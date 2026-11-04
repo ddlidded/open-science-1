@@ -315,10 +315,12 @@ const createSessionConfigChangeItems = (
             frameworkId: segment.frameworkId as PersistedMessageAgentTarget['frameworkId'],
             backendId: segment.backendId,
             providerId: segment.providerId ?? '',
-            // OpenCode and CodeBuddy expose the app-generated transport provider as a model
+            // OpenCode, CodeBuddy and Devin expose the app-generated transport provider as a model
             // prefix. Strip only that exact route format; vendor/model IDs remain intact.
             model:
-              segment.frameworkId === 'opencode' || segment.frameworkId === 'codebuddy'
+              segment.frameworkId === 'opencode' ||
+              segment.frameworkId === 'codebuddy' ||
+              segment.frameworkId === 'devin'
                 ? segment.model?.replace(/^open-science-[a-f0-9]{16}\//u, '')
                 : segment.model,
             reasoningEffort: 'default'

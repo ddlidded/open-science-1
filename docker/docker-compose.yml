@@ -1,0 +1,20 @@
+services:
+  open-science:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: open-science-web:latest
+    ports:
+      - '8080:8080'
+    environment:
+      # First-run admin bootstrap. Change after first sign-in via /admin.
+      ADMIN_USER: ${ADMIN_USER:-ddlidd}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Eddie#12}
+      # Set to '1' when served behind HTTPS so the session cookie is Secure.
+      GATEWAY_SECURE: ${GATEWAY_SECURE:-0}
+    volumes:
+      - open-science-data:/data
+    restart: unless-stopped
+
+volumes:
+  open-science-data:

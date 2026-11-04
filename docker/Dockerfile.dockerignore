@@ -1,0 +1,9 @@
+.git
+node_modules
+out
+dist
+e2e
+release-notes
+*.log
+.devin
+docker/auth-gateway/node_modules

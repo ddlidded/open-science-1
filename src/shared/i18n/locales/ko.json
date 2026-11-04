@@ -190,8 +190,10 @@
     "Startup stopped while accessing system credentials. Existing credentials and profile data have been preserved. Retry startup after resolving the authorization problem.": "시스템 자격 증명에 접근하는 동안 시작이 중지되었습니다. 기존 자격 증명과 프로필 데이터는 보존되었습니다. 승인 문제를 해결한 후 시작을 다시 시도하세요."
   },
   "renderer": {
+    "Cognition's hosted MCP server": "Cognition이 호스팅하는 MCP 서버",
     "Details and possible scenarios": "세부 정보 및 가능한 사용 상황",
     "Confirmed finding": "확인된 정보",
+    "Devin MCP": "Devin MCP",
     "Possible scenarios (not confirmed for this version)": "가능한 사용 상황(이 버전에 해당하는지는 확인되지 않음)",
     "What to do": "권장 조치",
     "Script reconstruction requires execution evidence linked to this exact version. Matching content in another version is not a substitute.": "스크립트를 재구성하려면 바로 이 버전에 연결된 실행 근거가 필요합니다. 다른 버전의 내용이 같더라도 해당 기록으로 대체할 수 없습니다.",
@@ -4400,6 +4402,12 @@
     "Tencent's coding agent for the terminal.": "Tencent의 터미널용 코딩 에이전트입니다.",
     "CodeBuddy is required for this framework. Install it below, or install it manually and re-detect.": "이 프레임워크에는 CodeBuddy가 필요합니다. 아래에서 설치하거나 수동으로 설치한 뒤 다시 감지하세요.",
     "Downloads CodeBuddy into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.": "CodeBuddy를 앱 관리 런타임에 다운로드하고 앱 런타임으로 실행합니다. 전역 Node.js나 npm은 필요하지 않습니다.",
+    "Downloads Devin into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.": "Devin을 앱 관리 런타임에 다운로드하고 앱 런타임으로 실행합니다. 전역 Node.js나 npm은 필요하지 않습니다.",
+    "Cognition's coding agent for the terminal.": "Cognition의 터미널용 코딩 에이전트입니다.",
+    "Devin is required for this framework. Install it below, or install it manually and re-detect.": "이 프레임워크에는 Devin이 필요합니다. 아래에서 설치하거나 수동으로 설치한 뒤 다시 감지하세요.",
+    "Devin subscription": "Devin 구독",
+    "Use the Devin CLI sign-in, or paste a Devin API key.": "Devin CLI 로그인을 사용하거나 Devin API 키를 붙여 넣으세요.",
+    "Devin signs in with the Devin CLI by default. Paste an API key below to use it instead; it is sent to Devin as {{envVar}}.": "Devin은 기본적으로 Devin CLI로 로그인합니다. 대신 사용할 API 키를 아래에 붙여 넣으세요. Devin에는 {{envVar}}로 전송됩니다.",
     "Add your OpenAlex API key": "OpenAlex API 키 추가",
     "OpenAlex API keys are optional for basic queries. Add one after a rate limit and the waiting call will continue automatically.": "OpenAlex API 키는 기본 쿼리에서 선택 사항입니다. 속도 제한 후 키를 추가하면 대기 중인 호출이 자동으로 계속됩니다.",
     "Paste your OpenAlex API key": "OpenAlex API 키 붙여넣기",

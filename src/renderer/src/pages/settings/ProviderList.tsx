@@ -136,6 +136,7 @@ const describeType = (provider: ProviderView, t: TFunction): string => {
     return t('Claude subscription')
   if (isCodexSubscriptionProvider(provider.type)) return codexSubscriptionProviderIdentity().name
   if (isXaiSubscriptionProvider(provider.type)) return 'xAI (Grok) OAuth'
+  if (provider.type === 'devin-subscription') return t('Devin subscription')
 
   return provider.vendorId
     ? (getOfficialVendor(provider.vendorId)?.label ?? t('Official'))

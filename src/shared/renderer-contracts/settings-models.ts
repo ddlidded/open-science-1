@@ -9,6 +9,7 @@ import type {
   XaiOAuthDeviceAuthorization,
   InstallClaudeRequest,
   InstallCodeBuddyRequest,
+  InstallDevinRequest,
   InstallPiRequest,
   InstallCodexRequest,
   InstallOpencodeRequest,
@@ -74,6 +75,9 @@ export const settingsDetectClaudeContracts = {
   'settings.detectCodex': callable<() => Promise<SettingsSnapshot>>()('settings', [
     'settings:detect-codex'
   ]),
+  'settings.detectDevin': callable<() => Promise<SettingsSnapshot>>()('settings', [
+    'settings:detect-devin'
+  ]),
   'settings.detectOpencode': callable<() => Promise<SettingsSnapshot>>()('settings', [
     'settings:detect-opencode'
   ])
@@ -99,6 +103,9 @@ export const settingsInstallClaudeContracts = {
   'settings.installCodex': callable<
     (request: InstallCodexRequest) => Promise<ClaudeInstallResult>
   >()('settings', ['settings:install-codex', LOCAL]),
+  'settings.installDevin': callable<
+    (request: InstallDevinRequest) => Promise<ClaudeInstallResult>
+  >()('settings', ['settings:install-devin', LOCAL]),
   'settings.installOpencode': callable<
     (request: InstallOpencodeRequest) => Promise<ClaudeInstallResult>
   >()('settings', ['settings:install-opencode', LOCAL])
@@ -188,6 +195,10 @@ export const settingsSetVisionModelContracts = {
   ]),
   'settings.uninstallCodeBuddy': callable<() => Promise<SettingsSnapshot>>()('settings', [
     'settings:uninstall-codebuddy',
+    LOCAL
+  ]),
+  'settings.uninstallDevin': callable<() => Promise<SettingsSnapshot>>()('settings', [
+    'settings:uninstall-devin',
     LOCAL
   ]),
   'settings.uninstallPi': callable<() => Promise<SettingsSnapshot>>()('settings', [

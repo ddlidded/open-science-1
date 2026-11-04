@@ -804,6 +804,9 @@ const validateProviderUnredacted = (
   provider: ResolvedProvider,
   deps: ValidateProviderDeps = {}
 ): Promise<ValidateProviderResult> => {
+  // Devin subscription has no gateway endpoint to probe — auth lives in the CLI's own sign-in or
+  // WINDSURF_API_KEY; treat the record as ready once persisted.
+  if (provider.type === 'devin-subscription') return Promise.resolve(toResult('ok'))
   if (provider.vendorId !== 'opencode-go') return validateCustomProvider(provider, deps)
 
   // Settings probes do not run through OpenCode's chat.headers plugin. Give each independent probe

@@ -13,6 +13,7 @@ import type {
   ClaudeInstallEvent,
   InstallClaudeRequest,
   InstallCodeBuddyRequest,
+  InstallDevinRequest,
   InstallPiRequest,
   InstallCodexRequest,
   InstallOpencodeRequest,
@@ -94,6 +95,7 @@ type CoreSettingsCommandStore = Pick<
   | 'detectClaude'
   | 'detectCodeBuddy'
   | 'detectCodex'
+  | 'detectDevin'
   | 'detectOpencode'
   | 'getConnectorDetail'
   | 'getPackageMirror'
@@ -111,6 +113,7 @@ type CoreSettingsCommandStore = Pick<
   | 'previewCustomServerTemplateExport'
   | 'installClaude'
   | 'installCodeBuddy'
+  | 'installDevin'
   | 'installPi'
   | 'installCodex'
   | 'installOpencode'
@@ -243,6 +246,11 @@ const settingsCoreApplicationCommands = Object.freeze({
     readonly [],
     StoreResult<'detectCodex'>
   >('settings:detect-codex'),
+  detectDevin: defineApplicationCommand<
+    'settings:detect-devin',
+    readonly [],
+    StoreResult<'detectDevin'>
+  >('settings:detect-devin'),
   detectOpencode: defineApplicationCommand<
     'settings:detect-opencode',
     readonly [],
@@ -331,6 +339,11 @@ const settingsCoreApplicationCommands = Object.freeze({
     readonly [request: InstallCodexRequest],
     StoreResult<'installCodex'>
   >('settings:install-codex'),
+  installDevin: defineApplicationCommand<
+    'settings:install-devin',
+    readonly [request: InstallDevinRequest],
+    StoreResult<'installDevin'>
+  >('settings:install-devin'),
   installOpencode: defineApplicationCommand<
     'settings:install-opencode',
     readonly [request: InstallOpencodeRequest],
@@ -572,6 +585,7 @@ const settingsCoreApplicationCommandGroup = defineApplicationCommandGroup('setti
   settingsCoreApplicationCommands.detectClaude,
   settingsCoreApplicationCommands.detectCodeBuddy,
   settingsCoreApplicationCommands.detectCodex,
+  settingsCoreApplicationCommands.detectDevin,
   settingsCoreApplicationCommands.detectOpencode,
   settingsCoreApplicationCommands.getConnectorDetail,
   settingsCoreApplicationCommands.getClassification,
@@ -593,6 +607,7 @@ const settingsCoreApplicationCommandGroup = defineApplicationCommandGroup('setti
   settingsCoreApplicationCommands.installCodeBuddy,
   settingsCoreApplicationCommands.installPi,
   settingsCoreApplicationCommands.installCodex,
+  settingsCoreApplicationCommands.installDevin,
   settingsCoreApplicationCommands.installOpencode,
   settingsCoreApplicationCommands.installNotebookNetwork,
   settingsCoreApplicationCommands.cancelNotebookNetworkSetup,
@@ -703,6 +718,8 @@ const registerCoreSettingsApplicationCommands = (
         dependencies.snapshotCommits.currentSnapshotAfter(dependencies.service.detectCodeBuddy()),
       'settings:detect-codex': () =>
         dependencies.snapshotCommits.currentSnapshotAfter(dependencies.service.detectCodex()),
+      'settings:detect-devin': () =>
+        dependencies.snapshotCommits.currentSnapshotAfter(dependencies.service.detectDevin()),
       'settings:detect-opencode': () =>
         dependencies.snapshotCommits.currentSnapshotAfter(dependencies.service.detectOpencode()),
       'settings:get-connector-detail': ({ args }) =>
@@ -758,6 +775,12 @@ const registerCoreSettingsApplicationCommands = (
         requireLocalCaller(callerContext, 'settings:install-codex')
         return dependencies.snapshotCommits.projectAfter(
           dependencies.service.installCodex(args[0], dependencies.emitInstallEvent)
+        )
+      },
+      'settings:install-devin': ({ args, callerContext }) => {
+        requireLocalCaller(callerContext, 'settings:install-devin')
+        return dependencies.snapshotCommits.projectAfter(
+          dependencies.service.installDevin(args[0], dependencies.emitInstallEvent)
         )
       },
       'settings:install-opencode': ({ args, callerContext }) => {

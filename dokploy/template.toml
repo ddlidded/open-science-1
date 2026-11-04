@@ -1,0 +1,18 @@
+# One-click Dokploy template. Every value is generated per deployment, so nothing is pre-filled
+# with a shared secret. Read the generated admin password in the service's Environment tab.
+[variables]
+main_domain = "${domain}"
+admin_password = "${password:24}"
+gateway_secret = "${base64:32}"
+
+[config]
+[[config.domains]]
+serviceName = "open-science"
+port = 8080
+host = "${main_domain}"
+
+[config.env]
+ADMIN_USER = "ddlidd"
+ADMIN_PASSWORD = "${admin_password}"
+GATEWAY_SECURE = "1"
+GATEWAY_SECRET = "${gateway_secret}"

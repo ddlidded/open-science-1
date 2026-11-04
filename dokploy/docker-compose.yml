@@ -1,0 +1,18 @@
+# Image-based compose used by the one-click Dokploy template (see template.toml).
+# The image is published to GHCR by .github/workflows/docker-publish.yml on every push to main.
+services:
+  open-science:
+    image: ghcr.io/aipoch/open-science-web:latest
+    restart: unless-stopped
+    expose:
+      - '8080'
+    environment:
+      ADMIN_USER: ${ADMIN_USER}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      GATEWAY_SECURE: ${GATEWAY_SECURE}
+      GATEWAY_SECRET: ${GATEWAY_SECRET}
+    volumes:
+      - open-science-data:/data
+
+volumes:
+  open-science-data: {}

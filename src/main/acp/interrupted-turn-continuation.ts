@@ -66,7 +66,8 @@ const expectedFrameworkForReplayTarget = (
     codebuddy: 'codebuddy',
     pi: 'pi',
     'codex-response': 'codex',
-    'codex-bridge': 'codex'
+    'codex-bridge': 'codex',
+    devin: 'devin'
   }
   return frameworks[target]
 }

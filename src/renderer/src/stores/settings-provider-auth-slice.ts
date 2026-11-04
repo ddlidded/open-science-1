@@ -4,6 +4,7 @@ import {
   claudeIsolatedProviderIdentity,
   claudeSharedProviderIdentity,
   codexSubscriptionProviderIdentity,
+  devinSubscriptionProviderIdentity,
   xaiSubscriptionProviderIdentity,
   isCodexSubscriptionProvider
 } from '../../../shared/settings'
@@ -109,6 +110,7 @@ const resolveUpsertedProviderId = (
   if (request.type === 'claude-shared') return claudeSharedProviderIdentity().id
   if (request.type === 'claude-isolated') return claudeIsolatedProviderIdentity().id
   if (request.type === 'xai-subscription') return xaiSubscriptionProviderIdentity().id
+  if (request.type === 'devin-subscription') return devinSubscriptionProviderIdentity().id
   if (request.id) return request.id
 
   const beforeIds = new Set(before.map((provider) => provider.id))

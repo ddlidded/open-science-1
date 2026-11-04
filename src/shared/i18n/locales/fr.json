@@ -192,8 +192,10 @@
     "Startup stopped while accessing system credentials. Existing credentials and profile data have been preserved. Retry startup after resolving the authorization problem.": "Le démarrage s’est arrêté pendant l’accès aux identifiants système. Les identifiants et les données de profil existants ont été conservés. Relancez le démarrage après avoir résolu le problème d’autorisation."
   },
   "renderer": {
+    "Cognition's hosted MCP server": "Serveur MCP hébergé par Cognition",
     "Details and possible scenarios": "Détails et scénarios possibles",
     "Confirmed finding": "Constat confirmé",
+    "Devin MCP": "Devin MCP",
     "Possible scenarios (not confirmed for this version)": "Scénarios possibles (non confirmés pour cette version)",
     "What to do": "Marche à suivre",
     "Script reconstruction requires execution evidence linked to this exact version. Matching content in another version is not a substitute.": "La reconstruction du script nécessite des preuves d’exécution liées à cette version précise. Un contenu identique dans une autre version ne peut pas les remplacer.",
@@ -4702,6 +4704,12 @@
     "Tencent's coding agent for the terminal.": "L’agent de codage de Tencent pour le terminal.",
     "CodeBuddy is required for this framework. Install it below, or install it manually and re-detect.": "CodeBuddy est requis pour ce framework. Installez-le ci-dessous, ou installez-le manuellement puis relancez la détection.",
     "Downloads CodeBuddy into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.": "Télécharge CodeBuddy dans l’environnement d’exécution géré par l’application et l’exécute avec celui-ci — aucun Node.js ni npm global requis.",
+    "Downloads Devin into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.": "Télécharge Devin dans l’environnement d’exécution géré par l’application et l’exécute avec celui-ci — aucun Node.js ni npm global requis.",
+    "Cognition's coding agent for the terminal.": "L’agent de codage de Cognition pour le terminal.",
+    "Devin is required for this framework. Install it below, or install it manually and re-detect.": "Devin est requis pour ce framework. Installez-le ci-dessous, ou installez-le manuellement puis relancez la détection.",
+    "Devin subscription": "Abonnement Devin",
+    "Use the Devin CLI sign-in, or paste a Devin API key.": "Utilisez la connexion de la CLI Devin ou collez une clé API Devin.",
+    "Devin signs in with the Devin CLI by default. Paste an API key below to use it instead; it is sent to Devin as {{envVar}}.": "Devin se connecte par défaut avec la CLI Devin. Collez une clé API ci-dessous pour l'utiliser à la place ; elle est envoyée à Devin comme {{envVar}}.",
     "Add your OpenAlex API key": "Ajouter votre clé API OpenAlex",
     "OpenAlex API keys are optional for basic queries. Add one after a rate limit and the waiting call will continue automatically.": "Les clés API OpenAlex sont facultatives pour les requêtes de base. Ajoutez-en une après avoir atteint une limite et l’appel en attente reprendra automatiquement.",
     "Paste your OpenAlex API key": "Collez votre clé API OpenAlex",

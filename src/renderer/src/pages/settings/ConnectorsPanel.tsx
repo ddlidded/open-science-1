@@ -11,6 +11,7 @@ import { ErrorNotice } from '@/components/error-notice'
  * responsive: wrapping toolbar and rows · visual gates: pending user review
  */
 import {
+  Bot,
   ChevronDown,
   Download,
   FileUp,
@@ -27,6 +28,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { ConnectorView, CustomServerView } from '../../../../shared/settings'
+import { DEVIN_MCP_CONNECTOR_TEMPLATE } from '../../../../shared/connector-presets'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -674,6 +676,25 @@ export function ConnectorsPanel({
                   <span>{tCommon('Import configuration')}</span>
                   <span className="text-xs text-muted-foreground">
                     {tCommon('Import a Connector or MCP client configuration')}
+                  </span>
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="gap-2.5"
+                onSelect={() =>
+                  onNavigate({
+                    kind: 'add',
+                    transport: 'remote',
+                    template: DEVIN_MCP_CONNECTOR_TEMPLATE
+                  })
+                }
+              >
+                <Bot className="size-4 shrink-0" aria-hidden="true" />
+                <span className="flex flex-col">
+                  <span>{t('Devin MCP')}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t("Cognition's hosted MCP server")}
                   </span>
                 </span>
               </DropdownMenuItem>

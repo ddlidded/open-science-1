@@ -59,6 +59,7 @@ import type {
 import { isCodexSubscriptionProviderId, type AgentFrameworkId } from '../../shared/settings'
 import { renderAppMcpToolReferences } from '../agent-framework/app-mcp-names'
 import { codeBuddyStorageDir } from '../agent-framework/codebuddy'
+import { devinStorageDir } from '../agent-framework/devin'
 import { codexStorageDir, codexSubscriptionStorageDir } from '../agent-framework/codex'
 import { opencodeStorageDir } from '../agent-framework/opencode'
 import type {
@@ -3025,7 +3026,8 @@ class AcpRuntime {
       opencodeStorageDir(root),
       codexStorageDir(root),
       codexSubscriptionStorageDir(root),
-      codeBuddyStorageDir(root)
+      codeBuddyStorageDir(root),
+      devinStorageDir(root)
     ]
   }
 
@@ -3118,7 +3120,9 @@ class AcpRuntime {
         ? 'opencode'
         : backend.framework.id === 'codebuddy'
           ? 'codebuddy'
-          : backend.framework.id === 'pi'
+          : backend.framework.id === 'devin'
+            ? 'devin'
+            : backend.framework.id === 'pi'
             ? 'pi'
             : backend.framework.id === 'codex'
               ? backend.modelRoute === 'codex-bridge'

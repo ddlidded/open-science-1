@@ -40,7 +40,8 @@ const REGISTRY_PROBE_PATHS: Record<AgentFrameworkId, string> = {
   opencode: '/opencode-ai/latest',
   codebuddy: '/@tencent-ai%2fcodebuddy-code/2.138.0',
   codex: '/@agentclientprotocol%2fcodex-acp/latest',
-  pi: '/@openma%2fpi-acp/0.1.8'
+  pi: '/@openma%2fpi-acp/0.1.8',
+  devin: '/devin/3000.11.234'
 }
 const REGISTRY_PROBE_TIMEOUT_MS = 5_000
 

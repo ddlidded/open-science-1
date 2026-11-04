@@ -394,6 +394,13 @@ const sanitizeSettings = (value: unknown): StoredSettings => {
     if (codebuddyVersion) settings.codebuddyVersion = codebuddyVersion
   }
 
+  const devinPath = asString(value.devinPath)
+  if (devinPath) {
+    settings.devinPath = devinPath
+    const devinVersion = asString(value.devinVersion)
+    if (devinVersion) settings.devinVersion = devinVersion
+  }
+
   const notebookRuntimeEnablement = sanitizeRuntimeEnablement(value.notebookRuntimeEnablement)
   if (notebookRuntimeEnablement) settings.notebookRuntimeEnablement = notebookRuntimeEnablement
   const agentEnvironmentCreationEnabled = asBoolean(value.agentEnvironmentCreationEnabled)

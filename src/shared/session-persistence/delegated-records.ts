@@ -60,7 +60,8 @@ const SUBAGENT_MODEL_ROUTES = new Set<ResolvedSubagentModelSnapshot['modelRoute'
   'pi',
   'codex-responses',
   'codex-responses-compatibility',
-  'codex-bridge'
+  'codex-bridge',
+  'devin-subscription'
 ])
 
 const SUBAGENT_REASONING_EFFORTS = new Set<ResolvedReasoningEffort>([

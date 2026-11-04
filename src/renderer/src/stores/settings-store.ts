@@ -35,6 +35,7 @@ import type {
   ClaudeSubscriptionProviderId,
   CodeBuddyInfo,
   CodexInfo,
+  DevinInfo,
   OpencodeInfo,
   ProjectFilesFilterPreference,
   ProviderType,
@@ -124,12 +125,14 @@ type SettingsStoreData = RuntimeSetupState &
     opencode: OpencodeInfo
     codex: CodexInfo
     codebuddy: CodeBuddyInfo
+    devin: DevinInfo
     // Whether each framework's detected runtime is the app-managed install (only these can be uninstalled
     // in-app). Mirrored from the main-process snapshot; a PATH/npm binary reads false.
     claudeManaged: boolean
     opencodeManaged: boolean
     codexManaged: boolean
     codebuddyManaged: boolean
+    devinManaged: boolean
     onboardingCompletedAt: number | undefined
     credentialStore?: 'os' | 'file'
     encryptionAvailable: boolean
@@ -202,10 +205,12 @@ export const createInitialSettingsState = (): SettingsStoreData => ({
   opencode: {},
   codex: {},
   codebuddy: {},
+  devin: {},
   claudeManaged: false,
   opencodeManaged: false,
   codexManaged: false,
   codebuddyManaged: false,
+  devinManaged: false,
   onboardingCompletedAt: undefined,
   encryptionAvailable: false,
   packageMirror: undefined,
@@ -264,10 +269,12 @@ const applySnapshot = (snapshot: SettingsSnapshot): Partial<SettingsStoreData> =
   opencode: snapshot.opencode,
   codex: snapshot.codex ?? {},
   codebuddy: snapshot.codebuddy ?? {},
+  devin: snapshot.devin ?? {},
   claudeManaged: snapshot.claudeManaged,
   opencodeManaged: snapshot.opencodeManaged,
   codexManaged: snapshot.codexManaged ?? false,
-  codebuddyManaged: snapshot.codebuddyManaged ?? false
+  codebuddyManaged: snapshot.codebuddyManaged ?? false,
+  devinManaged: snapshot.devinManaged ?? false
 })
 
 const canApplySnapshot = (state: SettingsStoreData, snapshot: SettingsSnapshot): boolean =>
@@ -463,6 +470,8 @@ const createSettingsStoreState = (
         await get().detectCodex()
       } else if (id === 'codebuddy') {
         await get().detectCodeBuddy()
+      } else if (id === 'devin') {
+        await get().detectDevin()
       } else if (id === 'claude-code') {
         await get().detectClaude()
       }

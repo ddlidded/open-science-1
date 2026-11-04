@@ -24,6 +24,7 @@ import {
   type ScanRepoRequest,
   type InstallClaudeRequest,
   type InstallCodeBuddyRequest,
+  type InstallDevinRequest,
   type InstallPiRequest,
   type InstallCodexRequest,
   type InstallOpencodeRequest,
@@ -153,6 +154,9 @@ const registerSettingsIpcHandlers = ({
   ipcMainHandle('settings:detect-codex', () =>
     snapshotCommits.currentSnapshotAfter(service.detectCodex())
   )
+  ipcMainHandle('settings:detect-devin', () =>
+    snapshotCommits.currentSnapshotAfter(service.detectDevin())
+  )
   ipcMainHandle('settings:install-opencode', (_event, request: InstallOpencodeRequest) =>
     snapshotCommits.projectAfter(service.installOpencode(request, broadcastInstallEvent))
   )
@@ -164,6 +168,9 @@ const registerSettingsIpcHandlers = ({
   )
   ipcMainHandle('settings:install-codex', (_event, request: InstallCodexRequest) =>
     snapshotCommits.projectAfter(service.installCodex(request, broadcastInstallEvent))
+  )
+  ipcMainHandle('settings:install-devin', (_event, request: InstallDevinRequest) =>
+    snapshotCommits.projectAfter(service.installDevin(request, broadcastInstallEvent))
   )
 
   ipcMainHandle('settings:install-claude', (_event, request: InstallClaudeRequest) =>
@@ -194,6 +201,12 @@ const registerSettingsIpcHandlers = ({
   ipcMainHandle('settings:uninstall-codex', () =>
     snapshotCommits.currentSnapshotAfter(
       workflows.runtime.uninstallRuntime('uninstallCodex', 'codex')
+    )
+  )
+
+  ipcMainHandle('settings:uninstall-devin', () =>
+    snapshotCommits.currentSnapshotAfter(
+      workflows.runtime.uninstallRuntime('uninstallDevin', 'devin')
     )
   )
 

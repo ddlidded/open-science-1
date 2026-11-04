@@ -1,6 +1,7 @@
 import type { AgentFrameworkId } from '../../shared/settings'
 import { claudeCodeFramework } from './claude-code'
 import { codeBuddyFramework } from './codebuddy'
+import { devinFramework } from './devin'
 import { codexFramework } from './codex'
 import { opencodeFramework } from './opencode'
 import { createPiFramework } from './pi'
@@ -25,7 +26,8 @@ const FRAMEWORKS: Record<AgentFrameworkId, AgentFramework> = {
       sessionOptionKey: OPEN_SCIENCE_SKILL_RUNTIME_SESSION_OPTION,
       createServer: createSkillRuntimeAcpServerConfig
     }
-  })
+  }),
+  devin: devinFramework
 }
 
 // Fallback for settings documents created before framework selection was persisted.

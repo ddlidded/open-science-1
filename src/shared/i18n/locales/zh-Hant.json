@@ -190,8 +190,10 @@
     "Startup stopped while accessing system credentials. Existing credentials and profile data have been preserved. Retry startup after resolving the authorization problem.": "啟動在存取系統憑證時停止。現有憑證和設定檔資料已保留。解決授權問題後，請重試啟動。"
   },
   "renderer": {
+    "Cognition's hosted MCP server": "Cognition 託管的 MCP 伺服器",
     "Details and possible scenarios": "詳細資訊與可能情境",
     "Confirmed finding": "已確認的資訊",
+    "Devin MCP": "Devin MCP",
     "Possible scenarios (not confirmed for this version)": "可能的使用情境（尚未確認本版本屬於哪種情況）",
     "What to do": "處理建議",
     "Script reconstruction requires execution evidence linked to this exact version. Matching content in another version is not a substitute.": "指令碼重建需要與目前這個版本對應的執行證據，不能用其他版本中內容相同的記錄替代。",
@@ -4403,6 +4405,12 @@
     "Tencent's coding agent for the terminal.": "騰訊的命令列編程智能體。",
     "CodeBuddy is required for this framework. Install it below, or install it manually and re-detect.": "此框架需要 CodeBuddy。請在下方安裝，或手動安裝後重新偵測。",
     "Downloads CodeBuddy into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.": "將 CodeBuddy 下載到應用程式代管執行時，並使用應用程式執行時執行 —— 無需全域 Node.js 或 npm。",
+    "Downloads Devin into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.": "將 Devin 下載到應用程式代管執行時，並使用應用程式執行時執行 —— 無需全域 Node.js 或 npm。",
+    "Cognition's coding agent for the terminal.": "Cognition 的命令列編程智能體。",
+    "Devin is required for this framework. Install it below, or install it manually and re-detect.": "此框架需要 Devin。請在下方安裝，或手動安裝後重新偵測。",
+    "Devin subscription": "Devin 訂閱",
+    "Use the Devin CLI sign-in, or paste a Devin API key.": "使用 Devin CLI 登入，或貼上 Devin API 金鑰。",
+    "Devin signs in with the Devin CLI by default. Paste an API key below to use it instead; it is sent to Devin as {{envVar}}.": "Devin 預設使用 Devin CLI 登入。在下方貼上 API 金鑰即可改用金鑰；它將作為 {{envVar}} 傳送給 Devin。",
     "Add your OpenAlex API key": "新增您的 OpenAlex API 金鑰",
     "OpenAlex API keys are optional for basic queries. Add one after a rate limit and the waiting call will continue automatically.": "基本查詢不需要 OpenAlex API 金鑰。達到速率限制後新增金鑰，等待中的呼叫將自動繼續。",
     "Paste your OpenAlex API key": "貼上您的 OpenAlex API 金鑰",

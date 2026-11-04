@@ -20,6 +20,7 @@ import { type ReasoningEffortPresetSetting } from '../../../../shared/reasoning-
 import {
   claudeIsolatedProviderIdentity,
   codexSubscriptionProviderIdentity,
+  devinSubscriptionProviderIdentity,
   preferredEndpoint,
   xaiSubscriptionProviderIdentity,
   type AgentFrameworkId,
@@ -184,12 +185,12 @@ export const providerFormModelForFramework = (
 
 // The provider kind pre-selected when the Add provider form opens, matched to the active agent
 // framework's most common official vendor: Claude Code → Anthropic, Codex → OpenAI,
-// OpenCode and Pi → DeepSeek, CodeBuddy → MiniMax. Exhaustive over AgentFrameworkId so a new framework
-// forces a deliberate choice, and keyed off OfficialVendorId so a registry rename fails at compile
-// time.
+// OpenCode and Pi → DeepSeek, CodeBuddy → MiniMax, Devin → its own subscription. Exhaustive over
+// AgentFrameworkId so a new framework forces a deliberate choice, and keyed off OfficialVendorId so
+// a registry rename fails at compile time.
 export const defaultProviderKindKey = (
   frameworkId: AgentFrameworkId
-): `official:${OfficialVendorId}` => {
+): `official:${OfficialVendorId}` | 'devin-subscription' => {
   switch (frameworkId) {
     case 'claude-code':
       return 'official:anthropic'
@@ -200,6 +201,8 @@ export const defaultProviderKindKey = (
       return 'official:deepseek'
     case 'codebuddy':
       return 'official:minimax'
+    case 'devin':
+      return 'devin-subscription'
     default: {
       // The never assignment keeps the switch exhaustive at compile time. Persisted state could
       // still hold a stale value outside the union; this runs during render, so degrade to the
@@ -290,10 +293,16 @@ export const hasProviderFormErrors = (errors: ProviderFormErrors): boolean =>
 // Grouping for the provider-type picker. 'codex' / 'claude' = each vendor's own subscription
 // sign-in, surfaced as its own section (only one is shown at a time, gated on the active
 // framework); 'api' = official vendors via their standard API key; 'other' = the custom gateway.
-export type ProviderKindGroup = 'codex' | 'claude' | 'subscription' | 'api' | 'other'
+export type ProviderKindGroup =
+  'codex' | 'claude' | 'devin' | 'subscription' | 'api' | 'other'
 
 export type ProviderKindGroupLabelKey =
-  'Codex subscription' | 'Claude subscription' | 'Subscription' | 'Official API' | 'Other'
+  | 'Codex subscription'
+  | 'Claude subscription'
+  | 'Devin subscription'
+  | 'Subscription'
+  | 'Official API'
+  | 'Other'
 
 // A provider kind's one-line description, as English copy (its own catalog key). The `label` beside it stays a plain
 // string: it is a vendor name from the registry (`Anthropic`, `Moonshot`) or a subscription identity,
@@ -302,6 +311,7 @@ export type ProviderKindDescriptionKey =
   | 'Use an existing Codex profile or sign in with a separate Open-Science profile.'
   | 'Use an existing Claude profile or sign in with a separate Open-Science profile.'
   | 'Sign in to your xAI subscription with a browser device code.'
+  | 'Use the Devin CLI sign-in, or paste a Devin API key.'
   | 'API key — models provided'
   | 'Base URL, key, and model for a Messages or Chat Completions endpoint'
 
@@ -313,6 +323,7 @@ export const PROVIDER_KIND_GROUPS: {
 }[] = [
   { id: 'codex', labelKey: 'Codex subscription' },
   { id: 'claude', labelKey: 'Claude subscription' },
+  { id: 'devin', labelKey: 'Devin subscription' },
   { id: 'subscription', labelKey: 'Subscription' },
   { id: 'api', labelKey: 'Official API' },
   { id: 'other', labelKey: 'Other' }
@@ -351,6 +362,12 @@ export const PROVIDER_KINDS: ProviderKind[] = [
     descriptionKey:
       'Use an existing Claude profile or sign in with a separate Open-Science profile.',
     group: 'claude'
+  },
+  {
+    key: 'devin-subscription',
+    label: devinSubscriptionProviderIdentity().name,
+    descriptionKey: 'Use the Devin CLI sign-in, or paste a Devin API key.',
+    group: 'devin'
   },
   ...OFFICIAL_VENDORS.map((vendor): ProviderKind => ({
     key: `official:${vendor.id}`,
@@ -424,6 +441,23 @@ export const providerKindPatch = (
     }
   }
 
+  if (key === 'devin-subscription') {
+    const identity = devinSubscriptionProviderIdentity()
+    return {
+      type: 'devin-subscription',
+      name: identity.name,
+      apiEndpoint: 'messages',
+      baseUrl: '',
+      model: '',
+      contextWindow: '',
+      maxInputTokens: '',
+      maxOutputTokens: '',
+      key: '',
+      vendorId: undefined,
+      region: undefined
+    }
+  }
+
   if (key.startsWith('official:')) {
     const vendorId = key.slice('official:'.length) as OfficialVendorId
     const vendor = getOfficialVendor(vendorId)
@@ -465,6 +499,7 @@ export const selectedKindKey = (value: ProviderFormValue): string => {
     return 'codex-subscription'
   }
   if (value.type === 'xai-subscription') return 'xai-subscription'
+  if (value.type === 'devin-subscription') return 'devin-subscription'
 
   return value.vendorId ? `official:${value.vendorId}` : 'custom'
 }

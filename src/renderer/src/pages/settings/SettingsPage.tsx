@@ -473,6 +473,9 @@ const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(function 
   const codebuddy = useSettingsStore((state) => state.codebuddy)
   const isDetectingCodeBuddy = useSettingsStore((state) => state.isDetectingCodeBuddy)
   const detectCodeBuddy = useSettingsStore((state) => state.detectCodeBuddy)
+  const devin = useSettingsStore((state) => state.devin)
+  const isDetectingDevin = useSettingsStore((state) => state.isDetectingDevin)
+  const detectDevin = useSettingsStore((state) => state.detectDevin)
   const encryptionAvailable = useSettingsStore((state) => state.encryptionAvailable)
   const load = useSettingsStore((state) => state.load)
   const saveValidatedProvider = useSettingsStore((state) => state.saveValidatedProvider)
@@ -586,6 +589,7 @@ const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(function 
   const mobileNavTriggerRef = useRef<HTMLButtonElement | null>(null)
   const mobileNavWasOpenRef = useRef(false)
   const codebuddyAutoDetectAttempted = useRef(false)
+  const devinAutoDetectAttempted = useRef(false)
   const skills = useSettingsStore((state) => state.skills)
   const connectors = useSettingsStore((state) => state.connectors)
   const customServers = useSettingsStore((state) => state.customServers)
@@ -738,6 +742,23 @@ const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(function 
       void detectCodeBuddy()
     }
   }, [open, activePanel, codebuddy?.resolvedPath, isDetectingCodeBuddy, detectCodeBuddy])
+
+  useEffect(() => {
+    if (!open) {
+      devinAutoDetectAttempted.current = false
+      return
+    }
+
+    if (
+      activePanel === 'agent' &&
+      !devinAutoDetectAttempted.current &&
+      !devin?.resolvedPath &&
+      !isDetectingDevin
+    ) {
+      devinAutoDetectAttempted.current = true
+      void detectDevin()
+    }
+  }, [open, activePanel, devin?.resolvedPath, isDetectingDevin, detectDevin])
 
   const isUsageVisible = open && activePanel === 'usage'
   const sessions = useSessionStore((state) =>
@@ -2330,6 +2351,9 @@ const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(function 
                           }
                           showClaudeIsolated={
                             agentFrameworkId === 'claude-code' && modelView.kind === 'create'
+                          }
+                          showDevinSubscription={
+                            agentFrameworkId === 'devin' && modelView.kind === 'create'
                           }
                           defaultCustomApiEndpoint={customApiEndpoint}
                           framework={activeFramework}

@@ -267,6 +267,7 @@ class HeadlessTaskApi {
       opencode: preflight.opencodeReady,
       codex: preflight.codexReady,
       codebuddy: preflight.codebuddyReady,
+      devin: preflight.devinReady === true,
       pi: preflight.piReady === true
     } as const
     const runtimeByFramework = {
@@ -289,6 +290,11 @@ class HeadlessTaskApi {
         configured: Boolean(settings.codebuddy.resolvedPath),
         version: settings.codebuddy.version,
         managed: settings.codebuddyManaged
+      },
+      devin: {
+        configured: Boolean(settings.devin.resolvedPath),
+        version: settings.devin.version,
+        managed: settings.devinManaged
       },
       pi: {
         configured: preflight.piReady === true,

@@ -190,8 +190,10 @@
     "Startup stopped while accessing system credentials. Existing credentials and profile data have been preserved. Retry startup after resolving the authorization problem.": "启动在访问系统凭据时停止。现有凭据和配置文件数据已保留。解决授权问题后，请重试启动。"
   },
   "renderer": {
+    "Cognition's hosted MCP server": "Cognition 托管的 MCP 服务器",
     "Details and possible scenarios": "详情与可能场景",
     "Confirmed finding": "已确认的信息",
+    "Devin MCP": "Devin MCP",
     "Possible scenarios (not confirmed for this version)": "可能的使用场景（尚未确认本版本属于哪种情况）",
     "What to do": "处理建议",
     "Script reconstruction requires execution evidence linked to this exact version. Matching content in another version is not a substitute.": "脚本重建需要与当前这个版本对应的执行证据，不能用其他版本中内容相同的记录替代。",
@@ -4403,6 +4405,12 @@
     "Tencent's coding agent for the terminal.": "腾讯的命令行编程智能体。",
     "CodeBuddy is required for this framework. Install it below, or install it manually and re-detect.": "此框架需要 CodeBuddy。请在下方安装，或手动安装后重新检测。",
     "Downloads CodeBuddy into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.": "将 CodeBuddy 下载到应用托管运行时，并使用应用运行时运行 —— 无需全局 Node.js 或 npm。",
+    "Downloads Devin into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.": "将 Devin 下载到应用托管运行时，并使用应用运行时运行 —— 无需全局 Node.js 或 npm。",
+    "Cognition's coding agent for the terminal.": "Cognition 的命令行编程智能体。",
+    "Devin is required for this framework. Install it below, or install it manually and re-detect.": "此框架需要 Devin。请在下方安装，或手动安装后重新检测。",
+    "Devin subscription": "Devin 订阅",
+    "Use the Devin CLI sign-in, or paste a Devin API key.": "使用 Devin CLI 登录，或粘贴 Devin API 密钥。",
+    "Devin signs in with the Devin CLI by default. Paste an API key below to use it instead; it is sent to Devin as {{envVar}}.": "Devin 默认使用 Devin CLI 登录。在下方粘贴 API 密钥即可改用密钥；它将作为 {{envVar}} 发送给 Devin。",
     "Add your OpenAlex API key": "添加您的 OpenAlex API 密钥",
     "OpenAlex API keys are optional for basic queries. Add one after a rate limit and the waiting call will continue automatically.": "基本查询无需 OpenAlex API 密钥。达到速率限制后添加密钥，等待中的调用将自动继续。",
     "Paste your OpenAlex API key": "粘贴您的 OpenAlex API 密钥",

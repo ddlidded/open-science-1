@@ -122,6 +122,7 @@ const modelRouteFor = (
       : 'opencode-anthropic'
   }
   if (frameworkId === 'codebuddy') return 'codebuddy-openai'
+  if (frameworkId === 'devin') return 'devin-subscription'
   if (frameworkId === 'pi') return 'pi'
   if (target.needsChatResponsesToChatCompletionsBridge) return 'codex-bridge'
   if (target.needsNativeResponsesCompatibility) return 'codex-responses-compatibility'
@@ -400,6 +401,7 @@ class BackendRoutePlanner {
         wire: active.apiEndpoints.includes('responses') ? 'responses' : 'messages'
       })
     }
+    if (frameworkId === 'devin') return Object.freeze({ kind: 'direct' })
     if (route === 'codex-bridge' || route === 'codex-responses-compatibility') {
       return Object.freeze({
         kind: route === 'codex-bridge' ? 'codex-chat' : 'codex-responses-compatibility',
@@ -468,9 +470,11 @@ class BackendRoutePlanner {
                 : normalizeMessagesRootUrl(candidate.provider.baseUrl ?? '')
               : frameworkId === 'codebuddy'
                 ? resolveChatCompletionsUrl(candidate.provider)
-                : route === 'codex-bridge'
-                  ? resolveChatCompletionsBaseUrl(candidate.provider)
-                  : resolveResponsesBaseUrl(candidate.provider)
+                : frameworkId === 'devin'
+                  ? undefined
+                  : route === 'codex-bridge'
+                    ? resolveChatCompletionsBaseUrl(candidate.provider)
+                    : resolveResponsesBaseUrl(candidate.provider)
       const id = model
         ? frameworkId === 'claude-code'
           ? claudeTargetId(candidate.providerId, model)

@@ -1,0 +1,10 @@
+{
+  "name": "open-science-auth-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "http-proxy": "^1.18.1"
+  }
+}

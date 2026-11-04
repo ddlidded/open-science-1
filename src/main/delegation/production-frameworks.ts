@@ -189,6 +189,9 @@ const createProductionDelegatedFrameworks = (
         }
       })
     }
+    if (frameworkId === 'devin') {
+      throw new Error(`Unsupported delegated-work framework: ${frameworkId}`)
+    }
     const unsupported: never = frameworkId
     throw new Error(`Unsupported delegated-work framework: ${String(unsupported)}`)
   }

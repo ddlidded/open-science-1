@@ -191,8 +191,10 @@
     "Startup stopped while accessing system credentials. Existing credentials and profile data have been preserved. Retry startup after resolving the authorization problem.": "Der Start wurde beim Zugriff auf Systemanmeldedaten angehalten. Bestehende Anmeldedaten und Profildaten wurden beibehalten. Beheben Sie das Freigabeproblem und starten Sie erneut."
   },
   "renderer": {
+    "Cognition's hosted MCP server": "Der gehostete MCP-Server von Cognition",
     "Details and possible scenarios": "Details und mögliche Nutzungsszenarien",
     "Confirmed finding": "Bestätigte Feststellung",
+    "Devin MCP": "Devin MCP",
     "Possible scenarios (not confirmed for this version)": "Mögliche Nutzungsszenarien (für diese Version nicht bestätigt)",
     "What to do": "Empfohlenes Vorgehen",
     "Script reconstruction requires execution evidence linked to this exact version. Matching content in another version is not a substitute.": "Die Skriptrekonstruktion benötigt Ausführungsnachweise für genau diese Version. Gleicher Inhalt in einer anderen Version ersetzt diese nicht.",
@@ -4195,6 +4197,12 @@
     "Tencent's coding agent for the terminal.": "Tencents Programmieragent für die Befehlszeile.",
     "CodeBuddy is required for this framework. Install it below, or install it manually and re-detect.": "Für dieses Framework ist CodeBuddy erforderlich. Installieren Sie CodeBuddy über die Optionen unten oder manuell und starten Sie anschließend die Erkennung erneut.",
     "Downloads CodeBuddy into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.": "Lädt CodeBuddy in die von der App verwaltete Laufzeit herunter und führt es dort aus – Node.js und npm müssen nicht global installiert sein.",
+    "Downloads Devin into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.": "Lädt Devin in die von der App verwaltete Laufzeit herunter und führt es dort aus – Node.js und npm müssen nicht global installiert sein.",
+    "Cognition's coding agent for the terminal.": "Cognitions Programmieragent für die Befehlszeile.",
+    "Devin is required for this framework. Install it below, or install it manually and re-detect.": "Für dieses Framework ist Devin erforderlich. Installieren Sie Devin über die Optionen unten oder manuell und starten Sie anschließend die Erkennung erneut.",
+    "Devin subscription": "Devin-Abo",
+    "Use the Devin CLI sign-in, or paste a Devin API key.": "Verwenden Sie die Devin-CLI-Anmeldung oder fügen Sie einen Devin-API-Schlüssel ein.",
+    "Devin signs in with the Devin CLI by default. Paste an API key below to use it instead; it is sent to Devin as {{envVar}}.": "Devin meldet sich standardmäßig über die Devin-CLI an. Fügen Sie unten einen API-Schlüssel ein, um diesen stattdessen zu verwenden; er wird als {{envVar}} an Devin gesendet.",
     "A conversation changed elsewhere and could not be saved safely.": "Eine Konversation wurde an anderer Stelle geändert und konnte nicht sicher gespeichert werden.",
     "Quit was canceled": "Das Beenden wurde abgebrochen",
     "This session was deleted or is unavailable.": "Diese Sitzung wurde gelöscht oder ist nicht verfügbar.",

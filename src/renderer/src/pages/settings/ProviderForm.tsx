@@ -77,6 +77,9 @@ type ProviderFormProps = {
   // showCodexSubscriptions: claude-isolated is only meaningful while Claude Code is the active
   // framework, so the wizard/settings page toggles this rather than showing it unconditionally.
   showClaudeIsolated?: boolean
+  // Whether to surface the Devin subscription option in the provider-kind picker. Mirrors the
+  // Codex/Claude gates: a Devin subscription can only drive the devin framework.
+  showDevinSubscription?: boolean
   // Preferred protocol for a newly selected Custom Gateway, derived from the active framework.
   defaultCustomApiEndpoint?: ProviderFormValue['apiEndpoint']
   // Active agent framework context. When supplied and the draft's API format cannot drive the
@@ -262,6 +265,7 @@ const ProviderForm = ({
   encryptionAvailable = true,
   showCodexSubscriptions = false,
   showClaudeIsolated = false,
+  showDevinSubscription = false,
   defaultCustomApiEndpoint = 'messages',
   framework
 }: ProviderFormProps): React.JSX.Element => {
@@ -272,6 +276,7 @@ const ProviderForm = ({
   const isCodexSubscription = value.type === 'codex-shared' || value.type === 'codex-isolated'
   const isClaudeSubscription = value.type === 'claude-shared' || value.type === 'claude-isolated'
   const isXaiSubscription = value.type === 'xai-subscription'
+  const isDevinSubscription = value.type === 'devin-subscription'
   const vendor = isOfficial && value.vendorId ? getOfficialVendor(value.vendorId) : undefined
   // A loopback custom gateway starts with the local-server presets visible, but the user can still
   // collapse them after that automatic reveal.
@@ -294,9 +299,10 @@ const ProviderForm = ({
     key: string
   }>()
   const keyVisible = revealedKeyDraft?.kind === selectedKey && revealedKeyDraft.key === value.key
-  // A loopback custom gateway (local model server) serves without a key, so the key field reads as
-  // optional and the required-field guard below stays quiet for it.
-  const keyRequired = !loopbackCustomGateway && (needsKey || !hasStoredKey)
+  // A Devin subscription also reads as optional: the CLI falls back to its own sign-in when no key
+  // is stored.
+  const optionalKey = loopbackCustomGateway || isDevinSubscription
+  const keyRequired = !optionalKey && (needsKey || !hasStoredKey)
   // Whether the active framework can drive this draft as configured. Undefined while the caller
   // supplies no framework context, or before the framework list has loaded (compatibility
   // feedback stays hidden then).
@@ -326,7 +332,7 @@ const ProviderForm = ({
         <div className="flex items-center gap-1">
           <label className={fieldLabelClassName} htmlFor="provider-key">
             {t('API key')}
-            {loopbackCustomGateway ? (
+            {optionalKey ? (
               <span className="ml-0.5 font-normal text-muted-foreground">{t('(optional)')}</span>
             ) : (
               <RequiredMark />
@@ -445,6 +451,8 @@ const ProviderForm = ({
                 // The Claude subscription section mirrors it: gate on Claude Code being active,
                 // the only framework that speaks the app-owned bearer token.
                 if (group.id === 'claude' && !showClaudeIsolated) return false
+                // Devin's subscription pairs only with the devin framework; same gating rule.
+                if (group.id === 'devin' && !showDevinSubscription) return false
 
                 return true
               })
@@ -470,7 +478,7 @@ const ProviderForm = ({
         </Select>
       </div>
 
-      {!isCodexSubscription && !isClaudeSubscription && !isXaiSubscription ? (
+      {!isCodexSubscription && !isClaudeSubscription && !isXaiSubscription && !isDevinSubscription ? (
         <div className="space-y-1.5">
           <label className={fieldLabelClassName} htmlFor="provider-name">
             {t('Name')}
@@ -498,6 +506,18 @@ const ProviderForm = ({
             {t('Default model: grok-4.7: 500K')}
           </code>
         </div>
+      ) : isDevinSubscription ? (
+        <>
+          <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+            <p className="text-xs text-muted-foreground">
+              {t(
+                'Devin signs in with the Devin CLI by default. Paste an API key below to use it instead; it is sent to Devin as {{envVar}}.',
+                { envVar: 'WINDSURF_API_KEY' }
+              )}
+            </p>
+          </div>
+          {keyField}
+        </>
       ) : isCodexSubscription ? (
         <>
           <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">

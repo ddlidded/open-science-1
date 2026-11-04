@@ -29,16 +29,19 @@ type RuntimeCommands = Pick<
   | 'detectOpencode'
   | 'detectCodex'
   | 'detectCodeBuddy'
+  | 'detectDevin'
   | 'installClaude'
   | 'installOpencode'
   | 'installCodex'
   | 'installCodeBuddy'
+  | 'installDevin'
   | 'installPi'
   | 'uninstallPi'
   | 'uninstallClaude'
   | 'uninstallOpencode'
   | 'uninstallCodeBuddy'
   | 'uninstallCodex'
+  | 'uninstallDevin'
   | 'onInstallLog'
 >
 
@@ -64,10 +67,12 @@ const snapshot = (patch: Partial<SettingsSnapshot> = {}): SettingsSnapshot => ({
   opencode: {},
   codex: {},
   codebuddy: {},
+  devin: {},
   claudeManaged: false,
   opencodeManaged: false,
   codexManaged: false,
   codebuddyManaged: false,
+  devinManaged: false,
   reasoningEffort: 'default',
   notificationsEnabled: true,
   conversationSkillImportEnabled: true,
@@ -122,16 +127,19 @@ const createCommands = (): RuntimeCommandMocks => ({
   detectOpencode: vi.fn().mockResolvedValue(snapshot()),
   detectCodex: vi.fn().mockResolvedValue(snapshot()),
   detectCodeBuddy: vi.fn().mockResolvedValue(snapshot()),
+  detectDevin: vi.fn().mockResolvedValue(snapshot()),
   installClaude: vi.fn().mockResolvedValue({ installId: 'claude-1', ok: true }),
   installOpencode: vi.fn().mockResolvedValue({ installId: 'opencode-1', ok: true }),
   installCodex: vi.fn().mockResolvedValue({ installId: 'codex-1', ok: true }),
   installPi: vi.fn().mockResolvedValue({ installId: 'pi-1', ok: true }),
   uninstallPi: vi.fn().mockResolvedValue(snapshot()),
   installCodeBuddy: vi.fn().mockResolvedValue({ installId: 'codebuddy-1', ok: true }),
+  installDevin: vi.fn().mockResolvedValue({ installId: 'devin-1', ok: true }),
   uninstallClaude: vi.fn().mockResolvedValue(snapshot()),
   uninstallOpencode: vi.fn().mockResolvedValue(snapshot()),
   uninstallCodeBuddy: vi.fn().mockResolvedValue(snapshot()),
   uninstallCodex: vi.fn().mockResolvedValue(snapshot()),
+  uninstallDevin: vi.fn().mockResolvedValue(snapshot()),
   onInstallLog: vi.fn().mockReturnValue(vi.fn())
 })
 

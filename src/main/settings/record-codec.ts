@@ -41,7 +41,8 @@ const PROVIDER_TYPES = new Set<ProviderType>([
   'official',
   'codex-shared',
   'codex-isolated',
-  'xai-subscription'
+  'xai-subscription',
+  'devin-subscription'
 ])
 
 const VALIDATION_CATEGORIES = new Set<ValidationCategory>([

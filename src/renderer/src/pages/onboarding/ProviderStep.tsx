@@ -347,6 +347,15 @@ const ProviderStep = ({
         return
       }
 
+      if (formValue.type === 'devin-subscription') {
+        // Devin authenticates through its own CLI sign-in; an optional pasted key rides along on the
+        // provider. Nothing browser- or token-based remains to run here.
+        const providerId = await persistProvider(toUpsertRequest(formValue))
+        if (providerId) await setActiveProvider(providerId)
+        advanceIfMounted()
+        return
+      }
+
       if (formValue.type === 'xai-subscription') {
         const providerId = await persistProvider(toUpsertRequest(formValue))
         xaiLoginCancelledRef.current = false
@@ -457,6 +466,7 @@ const ProviderStep = ({
             encryptionAvailable={encryptionAvailable}
             showCodexSubscriptions={agentFrameworkId === 'codex'}
             showClaudeIsolated={agentFrameworkId === 'claude-code'}
+            showDevinSubscription={agentFrameworkId === 'devin'}
             defaultCustomApiEndpoint={customApiEndpoint}
             framework={activeFramework}
           />

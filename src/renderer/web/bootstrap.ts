@@ -83,6 +83,7 @@ const DOMAIN_OWNED_WEB_RPC_CHANNELS = new Set([
   'settings:install-claude',
   'settings:install-codebuddy',
   'settings:install-codex',
+  'settings:install-devin',
   'settings:install-opencode'
 ])
 

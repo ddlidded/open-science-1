@@ -16,6 +16,7 @@ import claudeLogo from '@/assets/provider-icons/claude.svg'
 // CodeBuddy is a third-party product mark used only to identify its compatible ACP runtime.
 // Keep it separate from Open-Science branding and avoid implying affiliation or endorsement.
 import codebuddyLogo from '@/assets/provider-icons/codebuddy.svg'
+import devinLogo from '@/assets/provider-icons/devin.svg'
 import grokLogo from '@/assets/provider-icons/grok.svg'
 import bailianLogo from '@/assets/provider-icons/bailian.svg'
 import deepseekLogo from '@/assets/provider-icons/deepseek.svg'
@@ -49,6 +50,9 @@ export const AgentFrameworkIcon = ({
   }
   if (frameworkId === 'codebuddy') {
     return <img src={codebuddyLogo} alt="" width={size} height={size} className={className} />
+  }
+  if (frameworkId === 'devin') {
+    return <img src={devinLogo} alt="" width={size} height={size} className={className} />
   }
   if (frameworkId === 'pi') return <PiColor size={size} className={className} />
   return <CodexMono size={size} className={cn('text-foreground', className)} />
@@ -112,6 +116,10 @@ export const ProviderKindIcon = ({
 
   if (kindKey === 'xai-subscription') {
     return <img src={grokLogo} alt="" className={cn('size-5 shrink-0', className)} />
+  }
+
+  if (kindKey === 'devin-subscription') {
+    return <img src={devinLogo} alt="" className={cn('size-5 shrink-0', className)} />
   }
 
   if (

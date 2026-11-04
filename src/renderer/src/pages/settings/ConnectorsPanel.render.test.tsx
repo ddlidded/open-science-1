@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ConnectorsPanel } from './ConnectorsPanel'
+import { DEVIN_MCP_CONNECTOR_TEMPLATE } from '../../../../shared/connector-presets'
 import { createInitialSettingsState, useSettingsStore } from '@/stores/settings-store'
 import { useSpecialistStore } from '@/stores/specialist-store'
 import { createInitialTagState, useTagStore } from '@/stores/tag-store'
@@ -669,6 +670,22 @@ describe('ConnectorsPanel (groups)', () => {
     clickItemByText('menuitem', 'Import configuration')
 
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'import' })
+  })
+
+  it('offers the Devin MCP preset from the Add connector menu', () => {
+    const onNavigate = vi.fn()
+    act(() => {
+      root.render(<ConnectorsPanel onNavigate={onNavigate} />)
+    })
+
+    openDropdownByText('Add connector')
+    clickItemByText('menuitem', 'Devin MCP')
+
+    expect(onNavigate).toHaveBeenCalledWith({
+      kind: 'add',
+      transport: 'remote',
+      template: DEVIN_MCP_CONNECTOR_TEMPLATE
+    })
   })
 
   it('starts OAuth sign-in and displays the connected state', async () => {

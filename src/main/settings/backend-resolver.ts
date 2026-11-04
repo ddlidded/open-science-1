@@ -97,6 +97,7 @@ export type AgentBackendRuntimePort = Pick<
   | 'resolveOpencodeExecutable'
   | 'probeOpencodeVersion'
   | 'resolveCodeBuddyExecutable'
+  | 'resolveDevinExecutable'
   | 'resolveCodexExecutable'
   | 'probeCodexNativeVersion'
   | 'provisionClaudeRuntimeConfig'
@@ -374,9 +375,11 @@ export class AgentBackendResolver {
             )
           : framework.id === 'codebuddy'
             ? await this.runtime.resolveCodeBuddyExecutable(settings.codebuddyPath)
-            : framework.id === 'pi'
-              ? await this.runtime.resolvePiExecutable?.()
-              : await this.runtime.resolveOpencodeExecutable(settings.opencodePath)
+            : framework.id === 'devin'
+              ? await this.runtime.resolveDevinExecutable(settings.devinPath)
+              : framework.id === 'pi'
+                ? await this.runtime.resolvePiExecutable?.()
+                : await this.runtime.resolveOpencodeExecutable(settings.opencodePath)
     if (!executablePath) throw new Error('The selected agent executable is unavailable.')
     const codexNativeVersion =
       framework.id === 'codex'

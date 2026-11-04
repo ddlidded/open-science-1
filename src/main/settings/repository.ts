@@ -877,6 +877,23 @@ class SettingsRepository {
     })
   }
 
+  async setDevinInfo(resolvedPath: string, version?: string): Promise<StoredSettings> {
+    return this.mutate((settings) => ({
+      ...settings,
+      devinPath: resolvedPath,
+      devinVersion: version
+    }))
+  }
+
+  async clearDevinInfo(): Promise<StoredSettings> {
+    return this.mutate((settings) => {
+      const { devinPath, devinVersion, ...rest } = settings
+      void devinPath
+      void devinVersion
+      return rest
+    })
+  }
+
   async setCodexInfo(codex: StoredCodexInfo): Promise<StoredSettings> {
     return this.mutate((settings) => ({ ...settings, codex }))
   }

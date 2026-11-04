@@ -263,6 +263,9 @@ export type StoredSettings = {
   // Detected CodeBuddy CLI path + version. The first integration uses the upstream npm CLI.
   codebuddyPath?: string
   codebuddyVersion?: string
+  // Detected Devin CLI path + version.
+  devinPath?: string
+  devinVersion?: string
   // codex-acp adapter plus the native Codex runtime it launches.
   codex?: StoredCodexInfo
   activeProviderId?: string

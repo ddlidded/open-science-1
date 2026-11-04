@@ -14,7 +14,8 @@ const HISTORY_REPLAY_POLICIES: Record<HistoryReplayTarget, HistoryReplayPolicy> 
   codebuddy: { contextShare: 0.08, cap: 12_000 },
   pi: { contextShare: 0.08, cap: 12_000 },
   'codex-response': { contextShare: 0.1, cap: 16_000 },
-  'codex-bridge': { contextShare: 0.05, cap: 8_000 }
+  'codex-bridge': { contextShare: 0.05, cap: 8_000 },
+  devin: { contextShare: 0.08, cap: 12_000 }
 }
 
 const MIN_REPLAY_BUDGET = 2_000

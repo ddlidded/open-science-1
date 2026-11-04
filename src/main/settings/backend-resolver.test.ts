@@ -284,7 +284,8 @@ const makeHarness = (options: HarnessOptions = {}) => {
       void files
     }),
     reserveOpenCodeUsagePort: vi.fn(async () => 42_424),
-    resolveCodexProxyEnvironment: vi.fn(async () => undefined)
+    resolveCodexProxyEnvironment: vi.fn(async () => undefined),
+    resolveDevinExecutable: vi.fn(async () => '/devin')
   } satisfies AgentBackendRuntimePort
   const connectors = {
     connectorSkillNames: vi.fn(

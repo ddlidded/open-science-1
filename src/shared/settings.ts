@@ -53,6 +53,7 @@ export type ProviderType =
   | 'codex-shared'
   | 'codex-isolated'
   | 'xai-subscription'
+  | 'devin-subscription'
 
 // The stored Codex subscription always uses the app-owned runtime type. This discriminator preserves
 // which setup choice produced it so editing an imported profile does not masquerade as an isolated
@@ -78,6 +79,15 @@ export const CODEX_SUBSCRIPTION_PROVIDER_ID = 'builtin-codex-subscription'
 export const CLAUDE_SHARED_PROVIDER_ID = 'builtin-claude-shared'
 export const CLAUDE_ISOLATED_PROVIDER_ID = 'builtin-claude-isolated'
 export const XAI_SUBSCRIPTION_PROVIDER_ID = 'builtin-xai-subscription'
+export const DEVIN_SUBSCRIPTION_PROVIDER_ID = 'builtin-devin-subscription'
+
+export const devinSubscriptionProviderIdentity = (): { id: string; name: string } => ({
+  id: DEVIN_SUBSCRIPTION_PROVIDER_ID,
+  name: 'Devin subscription'
+})
+
+export const isDevinSubscriptionProvider = (type: ProviderType): type is 'devin-subscription' =>
+  type === 'devin-subscription'
 
 export const xaiSubscriptionProviderIdentity = (): { id: string; name: string } => ({
   id: XAI_SUBSCRIPTION_PROVIDER_ID,
@@ -230,6 +240,9 @@ export const isProviderUsableByFramework = (
   framework: { id: AgentFrameworkId; supportedApiTypes: readonly ModelProtocol[] }
 ): boolean => {
   if (isCodexSubscriptionProvider(provider.type)) return framework.id === 'codex'
+  // Devin subscription auth+models live in Devin Cloud (CLI creds / WINDSURF_API_KEY), so only the
+  // devin framework can serve it — no endpoint negotiation applies.
+  if (isDevinSubscriptionProvider(provider.type)) return framework.id === 'devin'
   // Both Claude subscription modes rely on the ~/.claude or app-owned credential that only
   // claude-code knows how to read; OpenCode receives neither an endpoint nor a token.
   if (isClaudeSubscriptionProvider(provider.type) && framework.id !== 'claude-code') return false
@@ -276,6 +289,12 @@ export type OpencodeInfo = {
 }
 
 export type CodeBuddyInfo = {
+  resolvedPath?: string
+  version?: string
+}
+
+// Detected devin CLI metadata (resolved path + reported version), persisted for the card.
+export type DevinInfo = {
   resolvedPath?: string
   version?: string
 }
@@ -586,6 +605,8 @@ export type SettingsSnapshot = {
   codebuddy: CodeBuddyInfo
   // Detected codex-acp adapter and its paired native Codex runtime.
   codex: CodexInfo
+  // Detected devin CLI, for the framework-aware detection card.
+  devin: DevinInfo
   activeProviderId?: string
   // Last explicitly configured Claude subscription mode, used when another provider is active.
   claudeSubscriptionProviderId?: ClaudeSubscriptionProviderId
@@ -604,6 +625,7 @@ export type SettingsSnapshot = {
   // Derived like the other frameworks: only the app-managed CodeBuddy shim is removed in-app.
   codebuddyManaged: boolean
   codexManaged: boolean
+  devinManaged: boolean
   // Timestamp of first-run onboarding completion; undefined until it finishes at least once.
   onboardingCompletedAt?: number
   // Non-secret package-mirror overrides (conda/pypi/cran). Absent means public hosts.
@@ -735,6 +757,8 @@ export type Preflight = {
   codexReady: boolean
   // Missing on older Main processes; Pi is selectable only when Main reports true.
   piReady?: boolean
+  // Optional like piReady: Devin is selectable only when Main reports a detected CLI.
+  devinReady?: boolean
   // Location of the separately installed Pi ACP adapter, reported while a managed installation exists.
   piRuntimePath?: string
   // Readiness of the selected agent framework, plus which one it is.
@@ -902,6 +926,7 @@ export type InstallSourceDescriptionKey =
   | 'Downloads a self-contained Claude — no Node.js or npm required.'
   | 'Downloads a self-contained Codex ACP runtime — no Node.js or npm required.'
   | 'Downloads CodeBuddy into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.'
+  | 'Downloads Devin into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.'
   | 'Downloads a self-contained OpenCode — no Node.js or npm required.'
 
 export type ClaudeInstallSourceInfo = {
@@ -1002,6 +1027,29 @@ export const getCodeBuddyInstallSources = (): ClaudeInstallSourceInfo[] => [
     requiresNpm: false,
     descriptionKey:
       'Downloads CodeBuddy into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.'
+  }
+]
+
+export type DevinInstallSource = Exclude<ClaudeInstallSource, 'official-script'>
+
+export type InstallDevinRequest = {
+  source: DevinInstallSource
+}
+
+export const getDevinInstallSources = (): ClaudeInstallSourceInfo[] => [
+  {
+    id: 'managed',
+    labelKey: 'App-managed download (recommended)',
+    displayCommand: '',
+    requiresNpm: false,
+    descriptionKey:
+      'Downloads Devin into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.'
+  },
+  {
+    id: 'npm',
+    labelKey: 'npm (global install)',
+    displayCommand: 'npm i -g devin',
+    requiresNpm: true
   }
 ]
 

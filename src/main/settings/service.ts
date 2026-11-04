@@ -93,6 +93,7 @@ import type {
   ImportSkillZipRequest,
   InstallClaudeRequest,
   InstallCodeBuddyRequest,
+  InstallDevinRequest,
   InstallPiRequest,
   InstallCodexRequest,
   InstallOpencodeRequest,
@@ -183,6 +184,7 @@ import type { ClaudeIsolatedAuthControllerPort } from './claude-isolated-auth'
 import type { ClaudeSharedAuthControllerPort } from './claude-shared-auth'
 import type { CodeBuddyDetectDeps } from './codebuddy-detect'
 import type { CodexAuthControllerPort } from './codex-auth'
+import type { DevinDetectDeps } from './devin-detect'
 import type { CodexDetectDeps } from './codex-detect'
 import type {
   CustomServerRuntimeProjectionProvider,
@@ -230,6 +232,7 @@ export type SettingsServiceOptions = {
   detectDeps?: ClaudeDetectDeps
   opencodeDetectDeps?: OpencodeDetectDeps
   codebuddyDetectDeps?: CodeBuddyDetectDeps
+  devinDetectDeps?: DevinDetectDeps
   // Reserves the authenticated loopback HTTP port exposed by `opencode acp`. Injectable so settings
   // tests do not bind real sockets.
   allocateOpenCodeUsagePort?: () => Promise<number>
@@ -608,6 +611,7 @@ class SettingsService {
       detectDeps: options.detectDeps,
       opencodeDetectDeps: options.opencodeDetectDeps,
       codebuddyDetectDeps: options.codebuddyDetectDeps,
+      devinDetectDeps: options.devinDetectDeps,
       codexDetectDeps: options.codexDetectDeps,
       allocateOpenCodeUsagePort: options.allocateOpenCodeUsagePort,
       executeClaudeProbe: options.executeClaudeProbe,
@@ -1131,6 +1135,11 @@ class SettingsService {
     return this.getSettingsView()
   }
 
+  async detectDevin(): Promise<SettingsSnapshot> {
+    await this.runtimeManager.detectDevin()
+    return this.getSettingsView()
+  }
+
   async detectCodex(): Promise<SettingsSnapshot> {
     await this.runtimeManager.detectCodex()
     return this.getSettingsView()
@@ -1585,6 +1594,13 @@ class SettingsService {
     return this.runtimeManager.installCodeBuddy(request, onEvent)
   }
 
+  async installDevin(
+    request: InstallDevinRequest,
+    onEvent: (event: ClaudeInstallEvent) => void
+  ): Promise<ClaudeInstallResult> {
+    return this.runtimeManager.installDevin(request, onEvent)
+  }
+
   async installPi(
     request: InstallPiRequest,
     onEvent: (event: ClaudeInstallEvent) => void
@@ -1621,6 +1637,11 @@ class SettingsService {
 
   async uninstallCodeBuddy(): Promise<UninstallResult> {
     const { activeBackendAffected } = await this.runtimeManager.uninstallCodeBuddy()
+    return { snapshot: await this.getSettingsView(), activeBackendAffected }
+  }
+
+  async uninstallDevin(): Promise<UninstallResult> {
+    const { activeBackendAffected } = await this.runtimeManager.uninstallDevin()
     return { snapshot: await this.getSettingsView(), activeBackendAffected }
   }
 

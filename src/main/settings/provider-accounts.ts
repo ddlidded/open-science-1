@@ -30,6 +30,7 @@ import {
   claudeIsolatedProviderIdentity,
   claudeSharedProviderIdentity,
   codexSubscriptionProviderIdentity,
+  devinSubscriptionProviderIdentity,
   isClaudeSubscriptionProvider,
   isCodexSubscriptionProvider,
   isProviderUsableByFramework,
@@ -98,6 +99,22 @@ type ProviderAccountsModuleOptions = {
   claudeSharedAuth?: ClaudeSharedAuthControllerPort
   xaiOAuth?: XaiOAuthControllerPort
 }
+// Family slugs `devin --model` accepts; each resolves to the latest version of that family at
+// spawn time, so a stored list stays valid across Devin Cloud model releases.
+const DEVIN_MODEL_SLUGS = [
+  'adaptive',
+  'fusion',
+  'opus',
+  'sonnet',
+  'swe',
+  'gpt',
+  'codex',
+  'gemini',
+  'kimi',
+  'deepseek',
+  'glm'
+] as const
+
 // Owns durable provider records and every provider-specific validation/authentication lifecycle;
 // executable installation, runtime spawn, live ACP reconnect, and transports remain outside.
 class ProviderAccountsModule {
@@ -276,7 +293,9 @@ class ProviderAccountsModule {
           ? claudeSharedProviderIdentity()
           : request.type === 'xai-subscription'
             ? xaiSubscriptionProviderIdentity()
-            : undefined
+            : request.type === 'devin-subscription'
+              ? devinSubscriptionProviderIdentity()
+              : undefined
     const requestedId = subscriptionIdentity?.id ?? request.id
     const existing = requestedId
       ? settings.providers.find((provider) => provider.id === requestedId)
@@ -325,6 +344,16 @@ class ProviderAccountsModule {
       credentialsChanged =
         existing !== undefined &&
         (existing.codexAuthMode !== provider.codexAuthMode || reimportCodexAuthentication)
+    } else if (request.type === 'devin-subscription') {
+      // Devin auth is optional: an API key maps to WINDSURF_API_KEY, while the CLI's own sign-in
+      // covers a keyless record. Model is an optional override forwarded as `--model`; the family
+      // slugs Devin accepts (opus/sonnet/swe/codex/…) resolve to the latest version each time.
+      carryKey()
+      provider.models = [...DEVIN_MODEL_SLUGS]
+      const model =
+        request.model === undefined ? existing?.model : request.model.trim() || undefined
+      credentialsChanged = Boolean(request.key) || model !== existing?.model
+      if (model) provider.model = model
     } else if (request.type === 'xai-subscription') {
       provider.apiEndpoints = ['messages', 'chat-completions', 'responses']
       provider.model = request.model?.trim() || existing?.model || defaultVendorModel('xai')

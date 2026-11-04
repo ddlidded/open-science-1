@@ -1,0 +1,32 @@
+# Dokploy deployment for Open-Science (web + auth gateway + Devin CLI).
+#
+# Dokploy: create a Compose service pointing at this repository, leave the compose path as
+# `docker-compose.yml`, then set the environment variables below in the Dokploy UI and attach a
+# domain to the `open-science` service on port 8080. Dokploy's Traefik terminates TLS, so no host
+# ports are published here.
+#
+# Data (users, settings, agent CLI logins, projects) lives in the `open-science-data` named volume
+# and survives rebuilds/redeploys. Do not delete that volume unless you intend to wipe state.
+
+services:
+  open-science:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: open-science-web:latest
+    expose:
+      - '8080'
+    environment:
+      # Bootstrap admin, used only when no users exist yet. Change the password after first sign-in.
+      ADMIN_USER: ${ADMIN_USER:?Set ADMIN_USER in Dokploy}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in Dokploy}
+      # Dokploy serves over HTTPS, so the session cookie must be Secure.
+      GATEWAY_SECURE: '1'
+      # Optional: fixed HMAC key for sessions. If unset, one is generated and kept in the volume.
+      GATEWAY_SECRET: ${GATEWAY_SECRET:-}
+    volumes:
+      - open-science-data:/data
+    restart: unless-stopped
+
+volumes:
+  open-science-data:

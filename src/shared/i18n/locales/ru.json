@@ -193,8 +193,10 @@
     "Startup stopped while accessing system credentials. Existing credentials and profile data have been preserved. Retry startup after resolving the authorization problem.": "Запуск остановлен при обращении к системным учётным данным. Существующие учётные данные и данные профиля сохранены. Устраните проблему с разрешением доступа и повторите запуск."
   },
   "renderer": {
+    "Cognition's hosted MCP server": "MCP-сервер, размещаемый Cognition",
     "Details and possible scenarios": "Подробности и возможные сценарии",
     "Confirmed finding": "Подтверждённые сведения",
+    "Devin MCP": "Devin MCP",
     "Possible scenarios (not confirmed for this version)": "Возможные сценарии (не подтверждены для этой версии)",
     "What to do": "Рекомендуемые действия",
     "Script reconstruction requires execution evidence linked to this exact version. Matching content in another version is not a substitute.": "Для реконструкции скрипта нужны свидетельства выполнения, связанные именно с этой версией. Совпадающее содержимое другой версии не заменяет их.",
@@ -4828,6 +4830,12 @@
     "Tencent's coding agent for the terminal.": "Агент Tencent для работы с кодом в командной строке.",
     "CodeBuddy is required for this framework. Install it below, or install it manually and re-detect.": "Для этого фреймворка требуется CodeBuddy. Установите его ниже или установите вручную и запустите обнаружение снова.",
     "Downloads CodeBuddy into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.": "Скачивает CodeBuddy в среду выполнения, управляемую приложением, и запускает его через среду приложения — глобальные Node.js и npm не требуются.",
+    "Downloads Devin into the app-managed runtime and runs it with the app runtime — no global Node.js or npm required.": "Скачивает Devin в среду выполнения, управляемую приложением, и запускает его через среду приложения — глобальные Node.js и npm не требуются.",
+    "Cognition's coding agent for the terminal.": "Агент Cognition для работы с кодом в командной строке.",
+    "Devin is required for this framework. Install it below, or install it manually and re-detect.": "Для этого фреймворка требуется Devin. Установите его ниже или установите вручную и запустите обнаружение снова.",
+    "Devin subscription": "Подписка Devin",
+    "Use the Devin CLI sign-in, or paste a Devin API key.": "Используйте вход через Devin CLI или вставьте API-ключ Devin.",
+    "Devin signs in with the Devin CLI by default. Paste an API key below to use it instead; it is sent to Devin as {{envVar}}.": "По умолчанию Devin выполняет вход через Devin CLI. Вставьте API-ключ ниже, чтобы использовать его вместо этого; он отправляется в Devin как {{envVar}}.",
     "Add your OpenAlex API key": "Добавьте API-ключ OpenAlex",
     "OpenAlex API keys are optional for basic queries. Add one after a rate limit and the waiting call will continue automatically.": "API-ключи OpenAlex необязательны для базовых запросов. Добавьте ключ после достижения лимита, и ожидаемый вызов продолжится автоматически.",
     "Paste your OpenAlex API key": "Вставьте API-ключ OpenAlex",

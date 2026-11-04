@@ -47,7 +47,8 @@ export function projectDiagnosticEnvironment(
         'claude-code',
         'opencode',
         'codebuddy',
-        'codex'
+        'codex',
+        'devin'
       ]),
       providerId: identifier(source.activeProviderId),
       model: identifier(source.activeModel),
@@ -70,6 +71,7 @@ export function projectDiagnosticEnvironment(
       claude: version(object(source.claude).version),
       opencode: version(source.opencodeVersion),
       codebuddy: version(source.codebuddyVersion),
+      devin: version(source.devinVersion),
       codexAdapter: version(object(source.codex).version),
       codexNative: version(object(source.codex).nativeVersion)
     },

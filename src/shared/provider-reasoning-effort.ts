@@ -82,6 +82,8 @@ export const resolveProviderReasoningEffortProfile = (
       return model ? resolveVendorModelReasoningEffort('anthropic', model) : { supported: false }
     case 'xai-subscription':
       return resolveVendorModelReasoningEffort('xai', model)
+    case 'devin-subscription':
+      return { supported: false }
     case 'custom':
       return resolveReasoningEffortProfile(provider.reasoningEffortPreset)
   }

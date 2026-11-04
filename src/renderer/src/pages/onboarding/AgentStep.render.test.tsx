@@ -993,6 +993,12 @@ describe('AgentStep', () => {
           installLogs: [],
           installProgress: null,
           installError: undefined
+        },
+        devin: {
+          isInstalling: false,
+          installLogs: [],
+          installProgress: null,
+          installError: undefined
         }
       }
     })

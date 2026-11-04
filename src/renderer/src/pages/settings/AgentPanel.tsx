@@ -16,6 +16,7 @@ import {
   getCodeBuddyInstallSources,
   getClaudeInstallSources,
   getCodexInstallSources,
+  getDevinInstallSources,
   getOpencodeInstallSources
 } from '../../../../shared/settings'
 import {
@@ -38,7 +39,7 @@ import { UninstallRuntimeDialog } from './UninstallRuntimeDialog'
 
 // The agent frameworks the settings page manages, keyed by their short name (used for the
 // uninstall dialog target and the framework card descriptors).
-type FrameworkKey = 'claude' | 'opencode' | 'codex' | 'codebuddy'
+type FrameworkKey = 'claude' | 'opencode' | 'codex' | 'codebuddy' | 'devin'
 type FrameworkCardKey = FrameworkKey | 'pi'
 
 type AgentPanelProps = {
@@ -80,11 +81,16 @@ const AgentPanel = ({
   const isDetectingCodeBuddy = useSettingsStore((state) => state.isDetectingCodeBuddy)
   const detectCodeBuddy = useSettingsStore((state) => state.detectCodeBuddy)
   const installCodeBuddy = useSettingsStore((state) => state.installCodeBuddy)
+  const devin = useSettingsStore((state) => state.devin)
+  const isDetectingDevin = useSettingsStore((state) => state.isDetectingDevin)
+  const detectDevin = useSettingsStore((state) => state.detectDevin)
+  const installDevin = useSettingsStore((state) => state.installDevin)
   // Per-runtime install slices: each card renders only its own progress/logs/error (issue #278).
   const claudeInstall = useSettingsStore((state) => state.installStates['claude-code'])
   const opencodeInstall = useSettingsStore((state) => state.installStates.opencode)
   const codexInstall = useSettingsStore((state) => state.installStates.codex)
   const codebuddyInstall = useSettingsStore((state) => state.installStates.codebuddy)
+  const devinInstall = useSettingsStore((state) => state.installStates.devin)
   const installPi = useSettingsStore((state) => state.installPi)
   const uninstallPi = useSettingsStore((state) => state.uninstallPi)
   const piInstall = useSettingsStore((state) => state.installStates.pi)
@@ -95,10 +101,12 @@ const AgentPanel = ({
   const opencodeManaged = useSettingsStore((state) => state.opencodeManaged)
   const codexManaged = useSettingsStore((state) => state.codexManaged)
   const codebuddyManaged = useSettingsStore((state) => state.codebuddyManaged)
+  const devinManaged = useSettingsStore((state) => state.devinManaged)
   const uninstallClaude = useSettingsStore((state) => state.uninstallClaude)
   const uninstallOpencode = useSettingsStore((state) => state.uninstallOpencode)
   const uninstallCodex = useSettingsStore((state) => state.uninstallCodex)
   const uninstallCodeBuddy = useSettingsStore((state) => state.uninstallCodeBuddy)
+  const uninstallDevin = useSettingsStore((state) => state.uninstallDevin)
   const detectClaude = useSettingsStore((state) => state.detectClaude)
   const installClaude = useSettingsStore((state) => state.installClaude)
   const checkEnvironment = useSettingsStore((state) => state.checkEnvironment)
@@ -170,6 +178,7 @@ const AgentPanel = ({
       else if (pendingUninstall === 'opencode') await uninstallOpencode()
       else if (pendingUninstall === 'codex') await uninstallCodex()
       else if (pendingUninstall === 'pi') await uninstallPi()
+      else if (pendingUninstall === 'devin') await uninstallDevin()
       else await uninstallCodeBuddy()
 
       setPendingUninstall(null)
@@ -285,7 +294,8 @@ const AgentPanel = ({
       opencode: preflight.opencodeReady,
       codex: codexReady,
       codebuddy: preflight.codebuddyReady,
-      pi: preflight.piReady === true
+      pi: preflight.piReady === true,
+      devin: preflight.devinReady === true
     }
     if (readyByFramework[agentFrameworkId]) return
 
@@ -302,6 +312,7 @@ const AgentPanel = ({
     codexReady,
     preflight.codebuddyReady,
     preflight.piReady,
+    preflight.devinReady,
     preflight.opencodeReady,
     queueOnboardingSwitch
   ])
@@ -309,7 +320,11 @@ const AgentPanel = ({
   // The section-level Re-detect re-scans all frameworks at once; the per-card detect buttons
   // were removed in favor of this single action.
   const isDetectingAnyFramework =
-    isDetectingClaude || isDetectingOpencode || isDetectingCodex || isDetectingCodeBuddy
+    isDetectingClaude ||
+    isDetectingOpencode ||
+    isDetectingCodex ||
+    isDetectingCodeBuddy ||
+    isDetectingDevin
   const handleDetectAllFrameworks = async (): Promise<void> => {
     setFrameworkDetectionError(undefined)
     setInstallActionError(undefined)
@@ -319,7 +334,8 @@ const AgentPanel = ({
       detectClaude(),
       detectOpencode(),
       detectCodex(),
-      detectCodeBuddy()
+      detectCodeBuddy(),
+      detectDevin()
     ])
     await checkEnvironment({ force: true })
 
@@ -530,6 +546,30 @@ const AgentPanel = ({
       install: codebuddyInstall,
       onInstall: (source) => {
         if (source === 'managed') return installCodeBuddy(source)
+        return Promise.resolve(undefined)
+      }
+    },
+    {
+      key: 'devin',
+      frameworkId: 'devin',
+      name: 'Devin',
+      icon: <AgentFrameworkIcon frameworkId="devin" size={24} />,
+      description: t("Cognition's coding agent for the terminal."),
+      ready: preflight.devinReady === true,
+      installed: Boolean(devin.resolvedPath),
+      version: devin.version,
+      path: devin.resolvedPath,
+      sourceLabel: 'devin',
+      sourceUrl: 'https://docs.devin.ai',
+      notReadyHint: t(
+        'Devin is required for this framework. Install it below, or install it manually and re-detect.'
+      ),
+      uninstallCommand: 'npm uninstall -g devin',
+      managed: devinManaged,
+      installSources: getDevinInstallSources(),
+      install: devinInstall,
+      onInstall: (source) => {
+        if (source !== 'official-script') return installDevin(source)
         return Promise.resolve(undefined)
       }
     }

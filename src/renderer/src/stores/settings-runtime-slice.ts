@@ -7,6 +7,7 @@ import type {
   ClaudeInstallResult,
   ClaudeInstallSource,
   CodexInstallSource,
+  DevinInstallSource,
   EnvironmentCheckResult,
   ManagedClaudeRegistry,
   Preflight,
@@ -46,6 +47,7 @@ export type RuntimeSetupState = {
   isDetectingOpencode: boolean
   isDetectingCodex: boolean
   isDetectingCodeBuddy: boolean
+  isDetectingDevin: boolean
   installStates: Record<AgentFrameworkId, RuntimeInstallState>
 }
 
@@ -56,6 +58,7 @@ export type RuntimeSetupActions = {
   detectOpencode: () => Promise<void>
   detectCodex: () => Promise<void>
   detectCodeBuddy: () => Promise<void>
+  detectDevin: () => Promise<void>
   installClaude: (
     source: ClaudeInstallSource,
     managedRegistry?: ManagedClaudeRegistry
@@ -64,11 +67,13 @@ export type RuntimeSetupActions = {
   installCodex: (source?: CodexInstallSource) => Promise<ClaudeInstallResult>
   installCodeBuddy: (source?: 'managed') => Promise<ClaudeInstallResult>
   installPi: (source?: 'managed') => Promise<ClaudeInstallResult>
+  installDevin: (source?: DevinInstallSource) => Promise<ClaudeInstallResult>
   uninstallClaude: () => Promise<void>
   uninstallOpencode: () => Promise<void>
   uninstallCodeBuddy: () => Promise<void>
   uninstallPi: () => Promise<void>
   uninstallCodex: () => Promise<void>
+  uninstallDevin: () => Promise<void>
   clearInstallLogs: (runtime?: AgentFrameworkId) => void
 }
 
@@ -89,16 +94,19 @@ type RuntimeSetupCommands = Pick<
   | 'detectOpencode'
   | 'detectCodex'
   | 'detectCodeBuddy'
+  | 'detectDevin'
   | 'installClaude'
   | 'installOpencode'
   | 'installCodex'
   | 'installCodeBuddy'
   | 'installPi'
+  | 'installDevin'
   | 'uninstallClaude'
   | 'uninstallOpencode'
   | 'uninstallCodeBuddy'
   | 'uninstallPi'
   | 'uninstallCodex'
+  | 'uninstallDevin'
   | 'onInstallLog'
 >
 
@@ -151,12 +159,14 @@ export const createInitialRuntimeSetupState = (): RuntimeSetupState => ({
   isDetectingOpencode: false,
   isDetectingCodex: false,
   isDetectingCodeBuddy: false,
+  isDetectingDevin: false,
   installStates: {
     'claude-code': createInitialRuntimeInstallState(),
     opencode: createInitialRuntimeInstallState(),
     codex: createInitialRuntimeInstallState(),
     codebuddy: createInitialRuntimeInstallState(),
-    pi: createInitialRuntimeInstallState()
+    pi: createInitialRuntimeInstallState(),
+    devin: createInitialRuntimeInstallState()
   }
 })
 
@@ -180,7 +190,8 @@ export const selectAnyInstalling = (state: RuntimeSetupState): boolean =>
   state.installStates['claude-code'].isInstalling ||
   state.installStates.opencode.isInstalling ||
   state.installStates.codex.isInstalling ||
-  state.installStates.codebuddy.isInstalling
+  state.installStates.codebuddy.isInstalling ||
+  state.installStates.devin.isInstalling
 
 const patchRuntimeSetupState = <Store extends RuntimeSetupHost>(
   set: StoreApi<Store>['setState'],
@@ -209,6 +220,7 @@ const snapshotRuntimePath = (
   if (runtime === 'claude-code') return snapshot.claude.resolvedPath
   if (runtime === 'opencode') return snapshot.opencode.resolvedPath
   if (runtime === 'codex') return snapshot.codex?.resolvedPath
+  if (runtime === 'devin') return snapshot.devin?.resolvedPath
   return snapshot.codebuddy?.resolvedPath
 }
 
@@ -476,6 +488,17 @@ export const createRuntimeSetupSlice = <Store extends RuntimeSetupHost>({
     }
   },
 
+  detectDevin: async () => {
+    patchRuntimeSetupState(set, { isDetectingDevin: true })
+    try {
+      const snapshot = await getCommands().detectDevin()
+      reconcileSnapshot(snapshot)
+      clearRuntimeInstallDiagnosticsIfMissing(set, 'devin', snapshot)
+    } finally {
+      patchRuntimeSetupState(set, { isDetectingDevin: false })
+    }
+  },
+
   installClaude: (source, managedRegistry) =>
     runRuntimeInstall(set, get, getCommands, reconcileSnapshot, 'claude-code', (commands) =>
       commands.installClaude({ source, managedRegistry })
@@ -495,6 +518,10 @@ export const createRuntimeSetupSlice = <Store extends RuntimeSetupHost>({
   installPi: (source = 'managed') =>
     runRuntimeInstall(set, get, getCommands, reconcileSnapshot, 'pi', (commands) =>
       commands.installPi({ source })
+    ),
+  installDevin: (source = 'managed') =>
+    runRuntimeInstall(set, get, getCommands, reconcileSnapshot, 'devin', (commands) =>
+      commands.installDevin({ source })
     ),
 
   uninstallClaude: async () => {
@@ -520,12 +547,18 @@ export const createRuntimeSetupSlice = <Store extends RuntimeSetupHost>({
     reconcileSnapshot(await getCommands().uninstallCodex())
     await get().refreshPreflight()
   },
+  uninstallDevin: async () => {
+    const snapshot = await getCommands().uninstallDevin()
+    reconcileSnapshot(snapshot)
+    clearRuntimeInstallDiagnosticsIfMissing(set, 'devin', snapshot)
+    await get().refreshPreflight()
+  },
 
   clearInstallLogs: (runtime) =>
     updateInstallStates(set, (current) => {
       const runtimes: AgentFrameworkId[] = runtime
         ? [runtime]
-        : ['claude-code', 'opencode', 'codex', 'codebuddy', 'pi']
+        : ['claude-code', 'opencode', 'codex', 'codebuddy', 'pi', 'devin']
       const installStates = { ...current }
 
       for (const id of runtimes) {

@@ -17,6 +17,7 @@ export type PreflightInput = {
   // Whether the recorded opencode executable still exists (same light re-check).
   opencodePathExists: boolean
   codebuddyPathExists: boolean
+  devinPathExists: boolean
   // Whether the recorded codex-acp adapter still reports a version.
   codexPathExists: boolean
   // Main must supply a validated Pi adapter/runtime before exposing Pi as ready.
@@ -42,6 +43,7 @@ const computePreflight = ({
   claudePathExists,
   opencodePathExists,
   codebuddyPathExists,
+  devinPathExists,
   codexPathExists,
   piRuntimeReady,
   piRuntimePath,
@@ -54,6 +56,7 @@ const computePreflight = ({
   const claudeReady = Boolean(settings.claude?.resolvedPath) && claudePathExists
   const opencodeReady = Boolean(settings.opencodePath) && opencodePathExists
   const codebuddyReady = Boolean(settings.codebuddyPath) && codebuddyPathExists
+  const devinReady = Boolean(settings.devinPath) && devinPathExists
   const codexReady = Boolean(settings.codex?.resolvedPath) && codexPathExists
   const piReady = piRuntimeReady === true
   const readyByFramework: Record<AgentFrameworkId, boolean> = {
@@ -61,7 +64,8 @@ const computePreflight = ({
     opencode: opencodeReady,
     codex: codexReady,
     codebuddy: codebuddyReady,
-    pi: piReady
+    pi: piReady,
+    devin: devinReady
   }
   const agentReady = readyByFramework[agentFrameworkId]
   const runtimeConfiguredByFramework: Record<AgentFrameworkId, boolean> = {
@@ -69,7 +73,8 @@ const computePreflight = ({
     opencode: Boolean(settings.opencodePath),
     codex: Boolean(settings.codex?.resolvedPath),
     codebuddy: Boolean(settings.codebuddyPath),
-    pi: Boolean(piRuntimePath)
+    pi: Boolean(piRuntimePath),
+    devin: Boolean(settings.devinPath)
   }
   const runtimeReadiness = {
     status: agentReady
@@ -128,6 +133,7 @@ const computePreflight = ({
     claudeReady,
     opencodeReady,
     codebuddyReady,
+    devinReady,
     codexReady,
     piReady,
     ...(piRuntimePath ? { piRuntimePath } : {}),

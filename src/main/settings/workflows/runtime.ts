@@ -26,6 +26,7 @@ type RuntimeSettingsWorkflowStore = Pick<
   | 'uninstallPi'
   | 'uninstallCodeBuddy'
   | 'uninstallCodex'
+  | 'uninstallDevin'
   | 'upsertProvider'
   | 'saveValidatedProvider'
   | 'deleteProvider'
@@ -52,7 +53,12 @@ type RuntimeSettingsWorkflowEffects = {
 }
 
 type RuntimeUninstallMethod =
-  'uninstallClaude' | 'uninstallOpencode' | 'uninstallCodeBuddy' | 'uninstallCodex' | 'uninstallPi'
+  | 'uninstallClaude'
+  | 'uninstallOpencode'
+  | 'uninstallCodeBuddy'
+  | 'uninstallCodex'
+  | 'uninstallDevin'
+  | 'uninstallPi'
 
 const affectedProviderIds = (providerId: string): readonly string[] =>
   providerId === CLAUDE_SHARED_PROVIDER_ID || providerId === CLAUDE_ISOLATED_PROVIDER_ID
