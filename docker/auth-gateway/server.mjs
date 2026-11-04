@@ -236,6 +236,10 @@ const adminPage = (users, me, notice = '') =>
 // ── proxy ─────────────────────────────────────────────────────────────────────
 const proxy = httpProxy.createProxyServer({ target: UPSTREAM, ws: true, changeOrigin: false })
 proxy.on('proxyReq', (proxyReq) => {
+  // The backend only authenticates loopback hosts and matching origins (web-service/auth.ts);
+  // rewrite Host to the upstream and drop the public Origin or every request 401s.
+  proxyReq.setHeader('host', new URL(UPSTREAM).host)
+  proxyReq.removeHeader('origin')
   const token = upstreamToken()
   if (token) proxyReq.setHeader('Authorization', `Bearer ${token}`)
 })
@@ -352,6 +356,8 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy()
     return
   }
+  req.headers.host = new URL(UPSTREAM).host
+  delete req.headers.origin
   const token = upstreamToken()
   if (token) req.headers.authorization = `Bearer ${token}`
   proxy.ws(req, socket, head)
