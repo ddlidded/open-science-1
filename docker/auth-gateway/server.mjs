@@ -243,6 +243,20 @@ proxy.on('proxyReq', (proxyReq) => {
   const token = upstreamToken()
   if (token) proxyReq.setHeader('Authorization', `Bearer ${token}`)
 })
+proxy.on('proxyRes', (proxyRes) => {
+  // Absolute upstream redirects carry the internal host; make them relative so the browser stays
+  // on the public origin.
+  const loc = proxyRes.headers.location
+  if (!loc) return
+  try {
+    const u = new URL(loc, UPSTREAM)
+    if (u.host === new URL(UPSTREAM).host) {
+      proxyRes.headers.location = u.pathname + u.search + u.hash
+    }
+  } catch {
+    /* leave non-URL locations untouched */
+  }
+})
 proxy.on('error', (err, req, res) => {
   if (res.writeHead) {
     res.writeHead(502, { 'content-type': 'text/plain' })
