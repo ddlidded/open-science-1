@@ -272,7 +272,7 @@ const isAdmin = (username) => loadUsers().some((u) => u.username === username &&
 
 // ── server ────────────────────────────────────────────────────────────────────
 const server = createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`)
+  const url = new URL(req.url, 'http://gateway.local')
   const path = url.pathname
   const user = readSession(req.headers.cookie)
 
