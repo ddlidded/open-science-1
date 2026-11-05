@@ -118,6 +118,67 @@ describe('runtime event presentation reducer', () => {
     ])
   })
 
+  it('merges assistant chunks that omit messageId under the prompt identity', () => {
+    const store = createSessionStore()
+    const context = createRuntimePresentationContext()
+    const prompt = store.getState().appendUserMessage({
+      sessionId: 'session-1',
+      content: 'Say hello'
+    })
+
+    // Devin sends agent_message_chunk without messageId; each chunk must append to the same
+    // assistant message instead of opening a new stream per event.
+    for (const [id, text] of [
+      ['chunk-1', 'Hello'],
+      ['chunk-2', ' world'],
+      ['chunk-3', '!']
+    ] as const) {
+      applyRuntimePresentationEvent(
+        event({
+          id,
+          role: 'assistant',
+          text,
+          promptMessageId: prompt?.messageId
+        }),
+        store,
+        context
+      )
+    }
+
+    const session = store.getState().sessions[0]
+    const assistantMessages = session.messages.filter((message) => message.role === 'agent')
+    expect(assistantMessages).toHaveLength(1)
+    expect(assistantMessages[0]).toMatchObject({
+      content: 'Hello',
+      streamId: prompt?.messageId
+    })
+    // Later chunks land in the streaming slice keyed by the same message.
+    expect(store.getState().streamingMessages[assistantMessages[0].id]?.content).toBe(
+      'Hello world!'
+    )
+
+    // A later prompt still opens a distinct message.
+    const nextPrompt = store.getState().appendUserMessage({
+      sessionId: 'session-1',
+      content: 'And again'
+    })
+    applyRuntimePresentationEvent(
+      event({
+        id: 'chunk-4',
+        role: 'assistant',
+        text: 'Hi',
+        promptMessageId: nextPrompt?.messageId
+      }),
+      store,
+      context
+    )
+    expect(
+      store
+        .getState()
+        .sessions[0].messages.filter((message) => message.role === 'agent')
+    ).toHaveLength(2)
+  })
+
   it('attributes a terminal tool to the owning prompt after a routed reply without an active run', () => {
     const store = createSessionStore()
     const context = createRuntimePresentationContext()

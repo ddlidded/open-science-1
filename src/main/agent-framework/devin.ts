@@ -37,10 +37,11 @@ type DevinFrameworkDeps = {
 export const devinStorageDir = (storageRoot: string): string => join(storageRoot, 'devin')
 
 // Devin runs its own ACP server (`devin acp`). Authentication and model selection live in Devin
-// Cloud: the agent reads `WINDSURF_API_KEY` first, then the credentials stored by
-// `devin auth login`, and also accepts a runtime ACP `authenticate` request or the `/login` slash
-// command. No app provider endpoint is translated for it, so supportedApiTypes stays empty and the
-// devin-subscription provider type is the only usable pairing.
+// Cloud: in ACP mode the agent deliberately ignores local CLI credentials and env vars, so a stored
+// provider key must be passed through the runtime `authenticate` request (methodId `devin-browser`,
+// `meta.api_key`) or via the `/login` slash command's browser flow. No app provider endpoint is
+// translated for it, so supportedApiTypes stays empty and the devin-subscription provider type is
+// the only usable pairing.
 export const createDevinFramework = ({
   platform = process.platform,
   sourceEnv = process.env,
@@ -76,10 +77,20 @@ export const createDevinFramework = ({
   prepareModelConfig(provider: ResolvedProvider, _ctx: ModelConfigContext): AgentModelConfig {
     // The Devin subscription provider may carry an API key (WINDSURF_API_KEY) and/or a preferred
     // model; when absent the CLI falls back to `devin auth login` credentials and account defaults.
+    // `devin acp` ignores env vars and on-disk CLI credentials — the key must also ride the ACP
+    // `authenticate` request (`methodId: devin-browser`, `meta.api_key`) or sessions never start.
     const env: Record<string, string> = { NO_BROWSER: '1' }
     if (provider.key) env.WINDSURF_API_KEY = provider.key
     return {
       env,
+      ...(provider.key
+        ? {
+            authentication: {
+              methodId: 'devin-browser',
+              _meta: { api_key: provider.key }
+            }
+          }
+        : {}),
       ...(provider.model
         ? { args: ['--model', provider.model], sessionModel: provider.model }
         : {})

@@ -48,9 +48,11 @@ const isBufferableAssistantTextEvent = (
   typeof getAcpRuntimeEventText(event) === 'string' &&
   !getAcpRuntimeEventImage(event)
 
-// Chooses the stream id used by the workspace store for chunk merging.
+// Chooses the stream id used by the workspace store for chunk merging. Devin omits messageId on
+// agent_message_chunk updates, so fall back to the per-turn prompt identity before the unique event
+// id — without it every chunk renders as its own message.
 const createRuntimeStreamId = (event: RuntimeChatMessageEvent): string =>
-  event.messageId ?? event.id
+  event.messageId ?? event.promptMessageId ?? event.id
 
 export {
   createRuntimeStreamId,
