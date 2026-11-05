@@ -56,10 +56,14 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       GATEWAY_SECURE: ${GATEWAY_SECURE:-1}
       GATEWAY_SECRET: ${GATEWAY_SECRET:-}
-    # Required for Notebook kernels: bubblewrap needs CLONE_NEWUSER, which Docker's
-    # default seccomp profile filters in unprivileged containers.
+    # Required for Notebook kernels: bubblewrap needs user namespaces and mounts. The
+    # image ships setuid bwrap; these relax the seccomp/AppArmor/capability restrictions
+    # that otherwise block it in a stock Docker container.
+    cap_add:
+      - SYS_ADMIN
     security_opt:
       - seccomp:unconfined
+      - apparmor:unconfined
     volumes:
       - open-science-data:/data
     restart: unless-stopped
@@ -67,19 +71,23 @@ volumes:
   open-science-data:
 ```
 
-> **Notebook kernel requirement:** the compose must include
-> `security_opt: seccomp=unconfined` (as above) or `bwrap` fails with
-> "No permissions to create new namespace". On Ubuntu 24.04+ hosts the kernel
-> additionally needs `kernel.apparmor_restrict_unprivileged_userns=0`:
+> **Notebook kernel requirement:** the compose must include the `cap_add` and
+> `security_opt` block above. Stock Docker blocks bubblewrap three ways:
+> `unshare`/`CLONE_NEWUSER` filtered by seccomp, `mount` denied by the
+> `docker-default` AppArmor profile, and MNT_LOCKED mounts when it runs in the
+> init user namespace. `SYS_ADMIN` + `seccomp=unconfined` +
+> `apparmor=unconfined` clear the first two, and the image's setuid
+> `/usr/bin/bwrap` (installed in `docker/Dockerfile`) works around the third by
+> mounting as init-userns root. On Ubuntu 24.04+ hosts the kernel additionally
+> needs `kernel.apparmor_restrict_unprivileged_userns=0`:
 >
 > ```bash
 > sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 > echo 'kernel.apparmor_restrict_unprivileged_userns=0' | sudo tee /etc/sysctl.d/60-userns.conf
 > ```
 >
-> The container keeps zero capabilities; bubblewrap only gains privileges
-> inside the user namespace it creates, so unconfined seccomp does not expose
-> the host.
+> Alternatively `privileged: true` covers all container flags — use it only if
+> the scoped options above are not enough on your host.
 
 Set these in Dokploy's **Environment** tab (no defaults — keep secrets out of
 the compose file):

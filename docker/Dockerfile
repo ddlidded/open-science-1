@@ -51,8 +51,13 @@ FROM node:24-bookworm-slim
 
 # libssl3 + openssl let Prisma detect the debian-openssl-3.0.x engine at runtime;
 # ca-certificates for TLS to MCP/API endpoints.
+# bubblewrap is setuid root so the notebook kernel sandbox can mount inside its own namespace.
+# setuid lets bwrap operate as init-userns root, which sidesteps the MNT_LOCKED mounts that
+# blocked the unprivileged-userns path; the container must still run with the seccomp and
+# AppArmor relaxations shown in docker-compose.yml.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libssl3 openssl ca-certificates \
+ && apt-get install -y --no-install-recommends libssl3 openssl ca-certificates bubblewrap \
+ && chmod u+s /usr/bin/bwrap \
  && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \

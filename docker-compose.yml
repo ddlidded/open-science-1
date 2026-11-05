@@ -24,10 +24,14 @@ services:
       GATEWAY_SECURE: '1'
       # Optional: fixed HMAC key for sessions. If unset, one is generated and kept in the volume.
       GATEWAY_SECRET: ${GATEWAY_SECRET:-}
-    # Notebooks run under bubblewrap, which needs CLONE_NEWUSER; Docker's default seccomp
-    # profile filters unshare/clone for unprivileged containers.
+    # Notebooks run under bubblewrap. Its sandbox needs CLONE_NEWUSER and mounts, so the
+    # container needs SYS_ADMIN plus seccomp/AppArmor relaxations. The image ships setuid
+    # bwrap (docker/Dockerfile), which also bypasses Docker's MNT_LOCKED mounts.
+    cap_add:
+      - SYS_ADMIN
     security_opt:
       - seccomp:unconfined
+      - apparmor:unconfined
     volumes:
       - open-science-data:/data
     restart: unless-stopped
