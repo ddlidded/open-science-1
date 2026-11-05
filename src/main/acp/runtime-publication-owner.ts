@@ -142,10 +142,20 @@ class AcpRuntimePublicationOwner {
       ? this.options.interactions.current(event.sessionId)
       : undefined
     const promptMessageId = interaction?.kind === 'prompt' ? interaction.promptMessageId : undefined
+    // Providers that omit messageId (Devin) need a stable per-turn message identity or every chunk
+    // merges under the unique event id and renders as a separate message.
+    const mergeStreamId =
+      event.kind === 'message' && event.role === 'assistant' && !event.messageId
+        ? (promptMessageId ?? event.runId)
+        : undefined
+    const mergedEvent =
+      mergeStreamId === undefined
+        ? event
+        : preservingFrozen(event, { ...event, messageId: mergeStreamId })
     const scopedEvent =
-      promptMessageId && !event.promptMessageId
-        ? preservingFrozen(event, { ...event, promptMessageId })
-        : event
+      promptMessageId && !mergedEvent.promptMessageId
+        ? preservingFrozen(mergedEvent, { ...mergedEvent, promptMessageId })
+        : mergedEvent
     const runtimeEvent = this.options.snapshotOwner.appendEvent(scopedEvent)
     onAppended?.()
     acpRuntimeEventsPublished.set(
