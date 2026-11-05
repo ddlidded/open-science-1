@@ -56,12 +56,30 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       GATEWAY_SECURE: ${GATEWAY_SECURE:-1}
       GATEWAY_SECRET: ${GATEWAY_SECRET:-}
+    # Required for Notebook kernels: bubblewrap needs CLONE_NEWUSER, which Docker's
+    # default seccomp profile filters in unprivileged containers.
+    security_opt:
+      - seccomp:unconfined
     volumes:
       - open-science-data:/data
     restart: unless-stopped
 volumes:
   open-science-data:
 ```
+
+> **Notebook kernel requirement:** the compose must include
+> `security_opt: seccomp=unconfined` (as above) or `bwrap` fails with
+> "No permissions to create new namespace". On Ubuntu 24.04+ hosts the kernel
+> additionally needs `kernel.apparmor_restrict_unprivileged_userns=0`:
+>
+> ```bash
+> sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+> echo 'kernel.apparmor_restrict_unprivileged_userns=0' | sudo tee /etc/sysctl.d/60-userns.conf
+> ```
+>
+> The container keeps zero capabilities; bubblewrap only gains privileges
+> inside the user namespace it creates, so unconfined seccomp does not expose
+> the host.
 
 Set these in Dokploy's **Environment** tab (no defaults — keep secrets out of
 the compose file):

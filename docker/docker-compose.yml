@@ -12,6 +12,10 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Eddie#12}
       # Set to '1' when served behind HTTPS so the session cookie is Secure.
       GATEWAY_SECURE: ${GATEWAY_SECURE:-0}
+    # Notebooks run under bubblewrap, which needs CLONE_NEWUSER; Docker's default seccomp
+    # profile filters unshare/clone for unprivileged containers.
+    security_opt:
+      - seccomp:unconfined
     volumes:
       - open-science-data:/data
     restart: unless-stopped

@@ -24,6 +24,10 @@ services:
       GATEWAY_SECURE: '1'
       # Optional: fixed HMAC key for sessions. If unset, one is generated and kept in the volume.
       GATEWAY_SECRET: ${GATEWAY_SECRET:-}
+    # Notebooks run under bubblewrap, which needs CLONE_NEWUSER; Docker's default seccomp
+    # profile filters unshare/clone for unprivileged containers.
+    security_opt:
+      - seccomp:unconfined
     volumes:
       - open-science-data:/data
     restart: unless-stopped

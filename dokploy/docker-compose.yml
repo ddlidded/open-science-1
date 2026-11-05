@@ -11,6 +11,10 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       GATEWAY_SECURE: ${GATEWAY_SECURE}
       GATEWAY_SECRET: ${GATEWAY_SECRET}
+    # Notebooks run under bubblewrap, which needs CLONE_NEWUSER; Docker's default seccomp
+    # profile filters unshare/clone for unprivileged containers.
+    security_opt:
+      - seccomp:unconfined
     volumes:
       - open-science-data:/data
 
