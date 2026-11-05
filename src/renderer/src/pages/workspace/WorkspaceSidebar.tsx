@@ -12,6 +12,7 @@ import {
   Files,
   Cpu,
   Lock,
+  LogOut,
   MoreVertical,
   PanelLeft,
   Plus,
@@ -52,6 +53,7 @@ import {
   useActionMenuTarget
 } from '@/components/action-menu'
 
+import { isWebLocation } from '@/lib/deep-link'
 import { projectPresentedSessionActionability } from './session-wait-reason'
 import { HighlightedText } from './composer/HighlightedText'
 import { fuzzyScore } from './composer/fuzzy-match'
@@ -1356,6 +1358,24 @@ const WorkspaceSidebarView = (props: WorkspaceSidebarViewProps): React.JSX.Eleme
               />
               <GitHubStarBadge variant="workspace" />
               <NetworkStatusIndicator variant="icon" />
+              {isWebLocation() ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // The Docker auth gateway owns /logout: it clears the session cookie and
+                    // redirects to /login, forcing re-authentication before app access.
+                    window.location.assign('/logout')
+                  }}
+                  className={cn(
+                    'inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-text-300 hover:bg-bg-300 hover:text-text-000',
+                    sidebarInteractiveTransitionClassName
+                  )}
+                  aria-label={t('Sign out')}
+                  title={t('Sign out')}
+                >
+                  <LogOut className="size-4" strokeWidth={2} aria-hidden="true" />
+                </button>
+              ) : null}
             </div>
           </div>
         </nav>
