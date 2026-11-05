@@ -19,6 +19,7 @@ import {
   Clock,
   GalleryVerticalEnd,
   LoaderCircle,
+  LogOut,
   MoreVertical,
   Plus,
   Search,
@@ -30,6 +31,7 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { isWebLocation } from '@/lib/deep-link'
 import { relativeTimeParts, type RelativeTimeUnit } from '@/lib/format-relative-time'
 import type { SessionCatalogRecovery } from '@/lib/session-persistence/session-persistence'
 import { cn } from '@/lib/utils'
@@ -798,6 +800,31 @@ const HomePage = ({
                     </TooltipTrigger>
                     <TooltipContent side="bottom">{t('Settings')}</TooltipContent>
                   </Tooltip>
+                  {isWebLocation() ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        asChild
+                        onFocus={(event) => {
+                          if (!event.currentTarget.matches(':focus-visible'))
+                            event.preventDefault()
+                        }}
+                      >
+                        <button
+                          type="button"
+                          aria-label={t('Sign out')}
+                          onClick={() => {
+                            // The Docker auth gateway owns /logout: it clears the session cookie
+                            // and redirects to /login, forcing re-authentication before app access.
+                            window.location.assign('/logout')
+                          }}
+                          className="inline-flex size-9 items-center justify-center rounded-lg text-text-300 hover:bg-bg-300 hover:text-text-000"
+                        >
+                          <LogOut className="size-4" strokeWidth={2} aria-hidden="true" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">{t('Sign out')}</TooltipContent>
+                    </Tooltip>
+                  ) : null}
                   <UpdateCapsule withTooltipProvider={false} />
                   {/* Account button hidden for now; restore when the account flow lands. */}
                   <Tooltip>
