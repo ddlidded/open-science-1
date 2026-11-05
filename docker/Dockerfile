@@ -51,13 +51,13 @@ FROM node:24-bookworm-slim
 
 # libssl3 + openssl let Prisma detect the debian-openssl-3.0.x engine at runtime;
 # ca-certificates for TLS to MCP/API endpoints.
-# bubblewrap is setuid root so the notebook kernel sandbox can mount inside its own namespace.
-# setuid lets bwrap operate as init-userns root, which sidesteps the MNT_LOCKED mounts that
-# blocked the unprivileged-userns path; the container must still run with the seccomp and
-# AppArmor relaxations shown in docker-compose.yml.
+# bubblewrap for the notebook kernel sandbox. It must NOT be setuid inside a container:
+# the setuid path calls capset, which fails when CAP_SYS_ADMIN is absent from the bounding
+# set. The unprivileged-user-namespace path works once the compose seccomp/AppArmor
+# relaxations are in place. docker/bwrap-shim (on PATH ahead of /usr/bin) strips
+# --unshare-pid — creating a child PID namespace fails in Docker and breaks /proc mounts.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libssl3 openssl ca-certificates bubblewrap \
- && chmod u+s /usr/bin/bwrap \
  && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
@@ -86,6 +86,9 @@ RUN useradd --create-home --uid 1001 openscience \
  && mkdir -p /data/home/.local/bin /opt/npm-global \
  && chown -R openscience /home/openscience /data /opt/auth-gateway \
  && npm i -g --prefix /opt/npm-global devin@3000.11.234 --no-audit --no-fund
+# Shadow /usr/bin/bwrap via PATH: strips --unshare-pid for the notebook kernel sandbox.
+COPY docker/bwrap-shim /opt/npm-global/bin/bwrap
+RUN chmod +x /opt/npm-global/bin/bwrap
 ENV NPM_CONFIG_PREFIX=/data/home/.local \
     PATH=/data/home/.local/bin:/opt/npm-global/bin:$PATH
 USER openscience

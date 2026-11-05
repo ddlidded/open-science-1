@@ -72,14 +72,13 @@ volumes:
 ```
 
 > **Notebook kernel requirement:** the compose must include the `cap_add` and
-> `security_opt` block above. Stock Docker blocks bubblewrap three ways:
-> `unshare`/`CLONE_NEWUSER` filtered by seccomp, `mount` denied by the
-> `docker-default` AppArmor profile, and MNT_LOCKED mounts when it runs in the
-> init user namespace. `SYS_ADMIN` + `seccomp=unconfined` +
-> `apparmor=unconfined` clear the first two, and the image's setuid
-> `/usr/bin/bwrap` (installed in `docker/Dockerfile`) works around the third by
-> mounting as init-userns root. On Ubuntu 24.04+ hosts the kernel additionally
-> needs `kernel.apparmor_restrict_unprivileged_userns=0`:
+> `security_opt` block above. Stock Docker blocks bubblewrap's sandbox through
+> seccomp (`unshare`/`CLONE_NEWUSER`) and the `docker-default` AppArmor profile
+> (`mount`). The image ships plain (non-setuid) `bwrap` — the setuid path fails
+> `capset` in containers — plus a `/opt/npm-global/bin/bwrap` shim that strips
+> `--unshare-pid`, since child PID namespaces fail in Docker and break `/proc`
+> mounts. On Ubuntu 24.04+ hosts the kernel additionally needs
+> `kernel.apparmor_restrict_unprivileged_userns=0`:
 >
 > ```bash
 > sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

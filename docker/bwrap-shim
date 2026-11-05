@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# bubblewrap shim for containers whose PID namespace is owned by the init user
+# namespace (standard Docker): creating a child PID namespace fails, which also
+# makes mounting a fresh /proc fail. Strip --unshare-pid and expand
+# --unshare-all to everything except PID. All other isolation dimensions are
+# preserved.
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    --unshare-pid) ;;
+    --unshare-all)
+      args+=(
+        --unshare-user
+        --unshare-ipc
+        --unshare-uts
+        --unshare-net
+        --unshare-cgroup
+        --unshare-mount
+      )
+      ;;
+    *) args+=("$arg") ;;
+  esac
+done
+exec /usr/bin/bwrap "${args[@]}"
