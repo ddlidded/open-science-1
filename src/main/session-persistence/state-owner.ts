@@ -969,6 +969,10 @@ class SessionPersistenceStateOwner {
     }
     this.recordSession(persisted)
     this.invalidateBindingTopology(scope.projectId, scope.sessionId)
+    // A durable commit supersedes a terminal write-failure recorded earlier for this session —
+    // otherwise the stale record keeps feeding the renderer's save banner until process restart.
+    if (this.runtimeTerminalFailures.has(scope.sessionId))
+      this.clearRuntimeTerminalFailure(scope.projectId, scope.sessionId)
     // JSON is the authoritative commit. Derived capture/index/publication failure must not report
     // that this mutation never happened or invite another execution of the provider work.
     try {
