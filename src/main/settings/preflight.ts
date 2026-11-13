@@ -65,6 +65,7 @@ const computePreflight = ({
     opencode: opencodeReady,
     codex: codexReady,
     codebuddy: codebuddyReady,
+    'open-science-agent': true,
     pi: piReady,
     devin: devinReady
   }
@@ -74,6 +75,7 @@ const computePreflight = ({
     opencode: Boolean(settings.opencodePath),
     codex: Boolean(settings.codex?.resolvedPath),
     codebuddy: Boolean(settings.codebuddyPath),
+    'open-science-agent': true,
     pi: Boolean(piRuntimePath),
     devin: Boolean(settings.devinPath)
   }
@@ -135,6 +137,7 @@ const computePreflight = ({
     opencodeReady,
     codebuddyReady,
     codexReady,
+    openScienceAgentReady: true,
     devinReady,
     piReady,
     ...(piRuntimePath ? { piRuntimePath } : {}),

@@ -45,6 +45,7 @@ describe('computePreflight', () => {
       codexReady: false,
       devinReady: false,
       piReady: false,
+      openScienceAgentReady: true,
       agentFrameworkId: 'claude-code',
       agentReady: true,
       activeProviderReady: true,

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, rm, symlink, unlink, truncate } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, rmdir, symlink, unlink, truncate } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resolve } from './paths'
@@ -75,6 +75,110 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 describe('worker result boundary', () => {
+  it('retains an unresolved scanned table caption in diagnostics without inventing cells', async () => {
+    await save({
+      ...raw(),
+      figures: [],
+      tables: [
+        {
+          id: 'p1-unresolved-1',
+          page: 1,
+          caption: { text: 'TABLE 1 Unbounded scan', rect: [50, 60, 250, 80] },
+          sourceViewport: { width: 600, height: 800 },
+          grid: [],
+          cells: [],
+          unassigned: [],
+          issues: ['no-source-cell-grid']
+        }
+      ]
+    })
+    const result = await readWorkerResult(root, identity, new Map())
+    expect(result.elements).toEqual([])
+    expect(result.issues).toContainEqual({
+      code: 'unresolved-region',
+      detail: 'TABLE 1 Unbounded scan'
+    })
+  })
+  it('retains a captioned math table as review-only without inventing cells', async () => {
+    const table = rawTable()
+    Object.assign(table, {
+      caption: {
+        text: 'Table 3: Incremental posterior covariance updates.',
+        rect: [60, 80, 540, 120]
+      },
+      grid: [],
+      cells: [],
+      unassigned: [],
+      issues: ['no-source-cell-grid']
+    })
+    await save({ ...raw(), figures: [], tables: [table] })
+    const result = await readWorkerResult(root, identity, new Map()),
+      element = result.elements[0]
+    expect(element).toMatchObject({
+      kind: 'table',
+      caption: { text: 'Table 3: Incremental posterior covariance updates.' },
+      issues: [{ code: 'no-source-cell-grid', detail: 'no-source-cell-grid' }]
+    })
+    expect('table' in element).toBe(false)
+    expect(result.issues).toContainEqual({
+      code: 'candidate-results',
+      detail:
+        'Candidate extraction can miss figures, tables, captions or cell content. Verify against the PDF.'
+    })
+    expect(parsePdfStructureResult(result, identity)).toEqual(result)
+  })
+  it.each(['bounded', 'legacy', 'outside-viewport'] as const)(
+    'decodes independent table-part crops without deriving them from cells: %s',
+    async (mode) => {
+      const parts = [0, 1].map((index) => {
+        const data = rawTable(),
+          scale = index + 1
+        data.sourceViewport = { width: 600 * scale, height: 800 * scale }
+        for (const cell of data.cells) {
+          cell.sourceRects = cell.sourceRects.map((rect) =>
+            rect.map((value, n) => (value + (n % 2 ? index * 240 : 0)) * scale)
+          )
+          for (const source of cell.sourceItems) source.index += index * 100
+        }
+        return {
+          ...data,
+          title: `${index + 1}. Group`,
+          ...(mode === 'legacy'
+            ? {}
+            : {
+                cropRects: [
+                  [60, 80 + index * 240, 300, 240 + index * 160].map((value) => value * scale)
+                ]
+              })
+        }
+      })
+      if (mode === 'outside-viewport') parts[0].cropRects![0][0] = -1
+      const value = raw(),
+        candidate = (value.figures as Record<string, unknown>[])[0]
+      const payload = { ...value, figures: [], tables: [{ ...candidate, parts }] }
+      await writeFile(join(root, 'structure.json'), serializeWorkerResult(payload))
+      if (mode === 'outside-viewport') {
+        await expect(readWorkerResult(root, identity, new Map())).rejects.toThrow('part boundary')
+        return
+      }
+      const result = await readWorkerResult(root, identity, new Map())
+      expect(result.elements[0].tableParts!.map((part) => part.regions)).toEqual(
+        mode === 'legacy'
+          ? [undefined, undefined]
+          : [
+              [{ page: 1, x: 0.1, y: 0.1, width: 0.4, height: expect.closeTo(0.2) }],
+              [{ page: 1, x: 0.1, y: 0.4, width: 0.4, height: expect.closeTo(0.1) }]
+            ]
+      )
+      expect(
+        result.elements[0].tableParts!.map((part) =>
+          part.table.cells.flatMap((cell) => cell.sourceItems ?? [])
+        )
+      ).toEqual(parts.map((part) => part.cells.flatMap((cell) => cell.sourceItems)))
+      expect(parsePdfStructureResult(result, identity)).toEqual(result)
+    }
+  )
+
   it('retains bounded unreliable mathematical origins on their own table', async () => {
     const table = rawTable(),
       origins = structuredClone(table.cells[0].sourceItems)
@@ -591,11 +695,30 @@ describe('worker result boundary', () => {
     })
     await expect(readWorkerResult(root, identity, new Map())).rejects.toThrow()
   })
-  it.each(['algorithm', 'graphical-table', 'open-rule-table'])(
+  it.each([
+    'table',
+    'algorithm',
+    'graphical-table',
+    'open-rule-table',
+    'native-ordinary-three-line'
+  ])(
     'accounts for and cleans %s thumbnails while retaining unexpected scratch files',
     async (kind) => {
       const originalBytes = await inspectScratch(root)
-      await writeFile(join(root, `thumbnails/p1-${kind}-0.png`), png)
+      let id = `p1-${kind}-0`
+      if (kind === 'native-ordinary-three-line') {
+        const { ordinaryExample } = await import(
+            pathToFileURL(resolve('test/ordinary-three-line-fixture.mjs')).href
+          ),
+          { recoverOrdinaryThreeLineTables } = await import(
+            pathToFileURL(resolve('resources/literature-pdf-native-ordinary-three-line.mjs')).href
+          ),
+          example = ordinaryExample(),
+          [proof] = recoverOrdinaryThreeLineTables(example.page, example.tokens, example.context)
+        expect(proof).toBeDefined()
+        id = proof.table.id
+      }
+      await writeFile(join(root, `thumbnails/${id}.png`), png)
       expect(await inspectScratch(root)).toBe(originalBytes + png.length)
       await writeFile(join(root, 'thumbnails/unowned.png'), png)
       await expect(inspectScratch(root)).rejects.toThrow('Unexpected PDF scratch')
@@ -894,3 +1017,34 @@ describe('worker result boundary', () => {
     await expect(readWorkerResult(root, identity, new Map())).rejects.toThrow('decoding budget')
   })
 })
+
+it.each(['bottom-strip', 'native-marker'])(
+  'accounts for and cleans only the existing table PNG %s transaction',
+  async (suffix) => {
+    const originalBytes = await inspectScratch(root),
+      pending = `page-1-table-0.png.${suffix}.pending`,
+      file = join(root, 'thumbnails', pending)
+    await writeFile(file, png)
+    expect(await inspectScratch(root, false)).toBe(originalBytes + png.length)
+    for (const name of [
+      `p1-figure-0.png.${suffix}.pending`,
+      `p1-algorithm-0.png.${suffix}.pending`,
+      `p1-table-0.png.${suffix}.pending`,
+      `page-1-table-0.png.other.pending`,
+      'page-1-table-0.png.pending',
+      pending + '.extra'
+    ]) {
+      const unexpected = join(root, 'thumbnails', name)
+      await writeFile(unexpected, png)
+      await expect(inspectScratch(root, false)).rejects.toThrow('Unexpected PDF scratch')
+      await unlink(unexpected)
+    }
+    await unlink(file)
+    await mkdir(file)
+    await expect(inspectScratch(root, false)).rejects.toThrow('Unexpected PDF scratch')
+    await rmdir(file)
+    await writeFile(file, png)
+    expect(await inspectScratch(root, true)).toBe(originalBytes + png.length)
+    expect(await inspectScratch(root, false)).toBe(0)
+  }
+)

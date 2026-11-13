@@ -1,3 +1,4 @@
+import { harnessTurnAdapter } from './harness-turn-adapter'
 import type {
   ActiveSession,
   ContentBlock,
@@ -31,7 +32,7 @@ type ProviderPromptExecutionInput = Readonly<{
   frameworkId: AgentFrameworkId
   isCurrent: () => boolean
   beforeDispatch: () => Promise<'active' | 'cancelled'>
-  captureStop: () => boolean
+  captureStop: (response: PromptResponse) => boolean
   onDispatched?: () => void
   onAccepted: () => void | Promise<void>
   routeNotification: (notification: SessionNotification) => void
@@ -299,7 +300,7 @@ class AcpProviderPromptExecutor {
           input.routeNotification(message.notification)
           continue
         }
-        if (!input.captureStop()) {
+        if (!input.captureStop(message.response)) {
           await cancelProbe()
           return Object.freeze({ kind: 'superseded', response: message.response })
         }
@@ -338,6 +339,7 @@ class AcpProviderPromptExecutor {
     if (frameworkId === 'codebuddy') return codeBuddyTurnAdapter
     // Pi ACP returns aggregate usage on PromptResponse; it has no OpenCode usage API to probe.
     if (frameworkId === 'pi') return piTurnAdapter
+    if (frameworkId === 'open-science-agent') return harnessTurnAdapter
 
     // Capture one generation's immutable API before adapter.begin awaits. Re-reading the owner for
     // the final snapshot could mix credentials or lose usage after a generation switch.

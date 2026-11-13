@@ -1,6 +1,7 @@
 import { CirclePlus, Sparkles } from 'lucide-react'
 
 import {
+  AipochMono,
   ClaudeColor,
   CodexMono,
   DevinColor,
@@ -51,6 +52,7 @@ export const AgentFrameworkIcon = ({
   if (frameworkId === 'codebuddy') {
     return <img src={codebuddyLogo} alt="" width={size} height={size} className={className} />
   }
+  if (frameworkId === 'open-science-agent') return <AipochMono size={size} className={className} />
   if (frameworkId === 'pi') return <PiColor size={size} className={className} />
   if (frameworkId === 'devin') return <DevinColor size={size} className={className} />
   return <CodexMono size={size} className={cn('text-foreground', className)} />

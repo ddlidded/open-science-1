@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { access, readFile, rm, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { createServer, type Server } from 'node:net'
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 
 import { proxyEnvironment } from './proxy-environment.js'
 import { normalizeFilesystemLayout, type FilesystemLayoutInput } from './filesystem-layout.js'
@@ -20,6 +20,13 @@ import {
 } from '../gateway/command-gateway.js'
 
 type WindowsShell = Readonly<{ kind: 'powershell' | 'cmd'; path: string }>
+
+const systemPowerShell = (): string => {
+  const root = process.env.SystemRoot || process.env.WINDIR
+  return root
+    ? win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    : 'powershell.exe'
+}
 
 type WindowsRuntimeVerification = Readonly<{
   argv: readonly string[]
@@ -92,7 +99,9 @@ type WindowsStandardLaunchRequest = Readonly<
 >
 
 type WindowsSupervisedLaunchRequest = Readonly<
-  WindowsStandardLaunchRequest & Pick<WindowsLaunchRequest, 'cwd' | 'hostPath'>
+  WindowsStandardLaunchRequest &
+    Pick<WindowsLaunchRequest, 'cwd' | 'hostPath'> &
+    Pick<WindowsLaunchRequest, 'ownershipRoot'>
 >
 
 type ProcessTreeTerminationProof = Readonly<{
@@ -102,7 +111,10 @@ type ProcessTreeTerminationProof = Readonly<{
   confirmState: () => Promise<WindowsProcessState>
   request: () => Promise<boolean>
   requestPath: string
+  release: () => Promise<void>
 }>
+
+type ProcessTreeProofMetadata = Pick<ProcessTreeTerminationProof, 'path' | 'token' | 'requestPath'>
 
 type WindowsProcessState = 'never-started' | 'started-and-reaped' | 'termination-unknown'
 
@@ -236,7 +248,7 @@ const connectionProbeSpecification = (port: number): string => {
   ].join('\n')
   return Buffer.from(
     JSON.stringify({
-      executable: 'powershell.exe',
+      executable: systemPowerShell(),
       arguments: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command],
       cwd: process.env.SystemRoot ?? 'C:\\Windows',
       readOnlyRoots: [],
@@ -401,7 +413,7 @@ const runElevatedHostCommand = async (
 ): Promise<{ cancelled: boolean }> => {
   const script = windowsElevationScript(hostPath, installationId, ownershipRoot, command, args)
   const encoded = Buffer.from(script, 'utf16le').toString('base64')
-  const result = await runCapture('powershell.exe', [
+  const result = await runCapture(systemPowerShell(), [
     '-NoLogo',
     '-NoProfile',
     '-NonInteractive',
@@ -627,15 +639,9 @@ const setWindowsRuntimeAccess = async (
   return result
 }
 
-const createProcessTreeTerminationProof = (
-  env: NodeJS.ProcessEnv,
-  cwd: string
-): ProcessTreeTerminationProof => {
+const createProcessTreeTerminationProof = (proofRoot: string): ProcessTreeTerminationProof => {
   const token = randomUUID()
-  const path = join(
-    env.TEMP ?? env.TMP ?? cwd,
-    `.open-science-process-tree-terminated-${token}.proof`
-  )
+  const path = join(proofRoot, `.open-science-process-tree-terminated-${token}.proof`)
   const requestPath = `${path}.request`
   let requestSent = false
   let terminalState: WindowsProcessState | undefined
@@ -664,8 +670,9 @@ const createProcessTreeTerminationProof = (
           const state = parse(await readFile(path, 'utf8'))
           if (state !== 'termination-unknown') {
             terminalState = state
-            await rm(path, { force: true }).catch(() => undefined)
-            await rm(requestPath, { force: true }).catch(() => undefined)
+            // Keep the terminal proof until the owning receipt or sandbox cleanup settles. A
+            // restart may need this evidence if the owner dies after confirmation but before it
+            // publishes cleanup completion.
             return state
           }
         } catch {
@@ -704,13 +711,17 @@ const createProcessTreeTerminationProof = (
     })
     return requesting
   }
+  const release = async (): Promise<void> => {
+    await Promise.all([rm(path, { force: true }), rm(requestPath, { force: true })])
+  }
   return {
     path,
     token,
     confirmState,
     request,
     confirm: async () => (await confirmState()) !== 'termination-unknown',
-    requestPath
+    requestPath,
+    release
   }
 }
 
@@ -719,16 +730,18 @@ const windowsLaunch = (
 ): {
   argv: string[]
   env: NodeJS.ProcessEnv
+  processTreeProof: ProcessTreeProofMetadata
   confirmProcessTreeTermination: () => Promise<boolean>
   requestProcessTreeTermination: () => Promise<boolean>
   confirmProcessState: () => Promise<WindowsProcessState>
+  releaseProcessTreeProof: () => Promise<void>
 } => {
   const shell: WindowsShell =
     typeof request.shell === 'object'
       ? request.shell
       : request.shell
         ? { kind: 'cmd', path: request.shell }
-        : { kind: 'powershell', path: 'powershell.exe' }
+        : { kind: 'powershell', path: systemPowerShell() }
   const childArgs =
     shell.kind === 'powershell'
       ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', request.command]
@@ -752,7 +765,7 @@ const windowsLaunch = (
   })
   const policyInvocation = { ...directInvocation, args: [...policyArguments] }
   const layout = normalizeFilesystemLayout(request.filesystem)
-  const proof = createProcessTreeTerminationProof(request.env, request.cwd)
+  const proof = createProcessTreeTerminationProof(request.ownershipRoot)
   const specification = Buffer.from(
     JSON.stringify({
       executable: policyInvocation.executable,
@@ -797,9 +810,11 @@ const windowsLaunch = (
       specification
     ],
     env,
+    processTreeProof: { path: proof.path, token: proof.token, requestPath: proof.requestPath },
     confirmProcessTreeTermination: proof.confirm,
     requestProcessTreeTermination: proof.request,
-    confirmProcessState: proof.confirmState
+    confirmProcessState: proof.confirmState,
+    releaseProcessTreeProof: proof.release
   }
 }
 
@@ -811,7 +826,7 @@ const windowsStandardLaunch = (
       ? request.shell
       : request.shell
         ? { kind: 'cmd', path: request.shell }
-        : { kind: 'powershell', path: 'powershell.exe' }
+        : { kind: 'powershell', path: systemPowerShell() }
   // PowerShell does not transparently relay a redirected stdin stream to a long-lived native child:
   // a Notebook loop can observe EOF and exit before the executor writes its first protocol frame.
   // Preserve structured native invocations in standard mode just as protected mode does. Batch
@@ -838,16 +853,18 @@ const windowsSupervisedLaunch = (
 ): {
   argv: string[]
   env: NodeJS.ProcessEnv
+  processTreeProof: ProcessTreeProofMetadata
   confirmProcessTreeTermination: () => Promise<boolean>
   requestProcessTreeTermination: () => Promise<boolean>
   confirmProcessState: () => Promise<WindowsProcessState>
+  releaseProcessTreeProof: () => Promise<void>
 } => {
   // This path does not apply AppContainer capabilities or ACLs. It only asks the bundled host to
   // contain an opted-in standard-mode worker and its helpers in a kill-on-close Job Object.
   const direct = windowsStandardLaunch(request)
   const [executable, ...args] = direct.argv
   if (!executable) throw new Error('Windows supervisor received an empty command.')
-  const proof = createProcessTreeTerminationProof(direct.env, request.cwd)
+  const proof = createProcessTreeTerminationProof(request.ownershipRoot)
   const specification = Buffer.from(
     JSON.stringify({
       executable,
@@ -869,9 +886,11 @@ const windowsSupervisedLaunch = (
   return {
     argv: [request.hostPath, 'supervise', specification],
     env: direct.env,
+    processTreeProof: { path: proof.path, token: proof.token, requestPath: proof.requestPath },
     confirmProcessTreeTermination: proof.confirm,
     requestProcessTreeTermination: proof.request,
-    confirmProcessState: proof.confirmState
+    confirmProcessState: proof.confirmState,
+    releaseProcessTreeProof: proof.release
   }
 }
 

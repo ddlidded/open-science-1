@@ -16,9 +16,10 @@ import {
   type CustomReasoningEffortTransport
 } from '@aipoch/providers'
 import { type ReasoningEffort } from './model-preference-contract'
-import { customProviderRequiresKey } from './provider-url-policy'
+import { customProviderRequiresKey, isOfficialOpenAiResponsesBase } from './provider-url-policy'
 import { type ReasoningEffortPresetSetting } from './reasoning-effort'
-import type { AgentFrameworkId } from './agent-framework-id'
+import type { AgentModelRoute, AgentFrameworkId } from './agent-framework-id'
+export { DEFAULT_AGENT_FRAMEWORK_ID } from './agent-framework-id'
 export type { AgentFrameworkId } from './agent-framework-id'
 export type { ModelProtocol } from '@aipoch/providers'
 export type { ReasoningEffort } from './model-preference-contract'
@@ -192,14 +193,17 @@ export const ENDPOINT_PATHS: Record<ModelProtocol, string> = {
   responses: '/v1/responses'
 }
 
-// The endpoints a provider offers. Absent/empty ⇒ treat as ['messages'] (every legacy provider, and
-// the migration target for the removed 'both' apiType, which mapped to ['messages','chat-completions']).
+// Codex subscription records always use Responses, including older records without endpoint metadata.
+// Other absent/empty endpoints default to Messages for legacy provider compatibility.
 export const providerEndpoints = (provider: {
   apiEndpoints?: readonly ModelProtocol[]
+  type?: ProviderType
 }): ModelProtocol[] =>
-  provider.apiEndpoints && provider.apiEndpoints.length > 0
-    ? [...provider.apiEndpoints]
-    : ['messages']
+  provider.type && isCodexSubscriptionProvider(provider.type)
+    ? ['responses']
+    : provider.apiEndpoints && provider.apiEndpoints.length > 0
+      ? [...provider.apiEndpoints]
+      : ['messages']
 
 export const shareProviderTransportFamily = (left: ProviderType, right: ProviderType): boolean =>
   isXaiSubscriptionProvider(left) === isXaiSubscriptionProvider(right)
@@ -253,13 +257,27 @@ export const requiresChatCompletionsBridge = (
 // Whether a provider can actually drive a given framework. Two axes: endpoint compatibility (above),
 // AND provider-type — a `claude-isolated` provider carries an app-owned Anthropic OAuth token
 // that no other framework can consume, so it is only usable by Claude Code regardless of endpoint.
-// Codex subscription providers carry their own login and can only drive Codex regardless of
-// endpoint. Enforced both in the renderer gates and main-side (preflight + spawn).
+// Codex subscription providers use either the native Codex runtime or the built-in Agent's
+// host-owned subscription bridge. Enforced both in the renderer gates and main-side (preflight + spawn).
 export const isProviderUsableByFramework = (
-  provider: { apiEndpoints?: readonly ModelProtocol[]; type: ProviderType },
+  provider: {
+    apiEndpoints?: readonly ModelProtocol[]
+    type: ProviderType
+    codexHarnessAvailable?: boolean
+  },
   framework: { id: AgentFrameworkId; supportedApiTypes: readonly ModelProtocol[] }
 ): boolean => {
-  if (isCodexSubscriptionProvider(provider.type)) return framework.id === 'codex'
+  if (
+    framework.id === 'open-science-agent' &&
+    !['custom', 'official', 'xai-subscription'].includes(provider.type) &&
+    !isCodexSubscriptionProvider(provider.type)
+  )
+    return false
+  if (isCodexSubscriptionProvider(provider.type))
+    return (
+      framework.id === 'codex' ||
+      (framework.id === 'open-science-agent' && provider.codexHarnessAvailable !== false)
+    )
   // The Devin provider is a placeholder for Devin's own account session (`devin auth login`);
   // no other framework can consume it, and Devin consumes no app provider transport.
   if (isDevinProvider(provider.type)) return framework.id === 'devin'
@@ -276,25 +294,13 @@ export const isProviderUsableByFramework = (
   return isProviderCompatibleWith(endpoints, framework.supportedApiTypes)
 }
 
-// The endpoint to actually use for a (provider, framework) pair. When both sides support OpenAI
-// /v1/chat/completions it wins (per product decision); otherwise the shared Anthropic endpoint; else
-// undefined when the pair is incompatible.
-export const preferredEndpoint = <const FrameworkEndpoints extends readonly ModelProtocol[]>(
+export const DEFAULT_ENDPOINT_ORDER = ['responses', 'chat-completions', 'messages'] as const
+
+// Frameworks list their native protocols in preference order. Bridges use the default order.
+export const preferredEndpoint = <const Endpoint extends ModelProtocol>(
   endpoints: readonly ModelProtocol[],
-  frameworkEndpoints: FrameworkEndpoints
-): FrameworkEndpoints[number] | undefined => {
-  const shared: FrameworkEndpoints[number][] = frameworkEndpoints.filter((endpoint) =>
-    endpoints.includes(endpoint)
-  )
-
-  if (shared.length === 0) return undefined
-
-  return (
-    shared.find((endpoint) => endpoint === 'responses') ??
-    shared.find((endpoint) => endpoint === 'chat-completions') ??
-    shared.find((endpoint) => endpoint === 'messages')
-  )
-}
+  preference: readonly Endpoint[]
+): Endpoint | undefined => preference.find((endpoint) => endpoints.includes(endpoint))
 
 // Detected claude executable metadata, persisted so later spawns skip re-detection.
 export type ClaudeInfo = {
@@ -358,6 +364,9 @@ export type ClaudeDetectResult = {
 export type ProviderValidationTarget = {
   model?: string
   endpoint?: ModelProtocol
+  // Absent for HTTP evidence and historical records. Native evidence applies only to this route.
+  frameworkId?: AgentFrameworkId
+  route?: AgentModelRoute
 }
 
 export type ProviderValidationFailure = {
@@ -379,6 +388,8 @@ export type ProviderView = {
   type: ProviderType
   codexAuthMode?: CodexSubscriptionAuthMode
   codexTransport?: CodexSubscriptionTransport
+  // Host-derived capability of the built-in Agent; native Codex remains independently available.
+  codexHarnessAvailable?: boolean
   name: string
   // Which chat APIs this provider's endpoint speaks; drives per-framework availability. Absent ⇒
   // treat as ['messages'] (every legacy provider).
@@ -441,7 +452,21 @@ export type XaiOAuthLoginResult = {
 export const providerValidationTargetMatches = (
   left: ProviderValidationTarget,
   right: ProviderValidationTarget
-): boolean => left.model === right.model && left.endpoint === right.endpoint
+): boolean =>
+  left.model === right.model &&
+  left.endpoint === right.endpoint &&
+  left.frameworkId === right.frameworkId &&
+  left.route === right.route
+
+// Evidence applicability is directional: legacy HTTP evidence remains framework-independent.
+export const providerValidationTargetApplies = (
+  evidence: ProviderValidationTarget,
+  target: ProviderValidationTarget
+): boolean =>
+  evidence.model === target.model &&
+  evidence.endpoint === target.endpoint &&
+  (evidence.frameworkId === undefined ||
+    (evidence.frameworkId === target.frameworkId && evidence.route === target.route))
 
 export const providerValidationFailed = (
   provider: {
@@ -462,11 +487,11 @@ export const providerValidationFailed = (
         ...(provider.lastValidationFailure.category === 'model-not-found'
           ? (provider.lastValidationFailure.targets ?? [])
           : [])
-      ].some((failed) => providerValidationTargetMatches(failed, target)))) &&
+      ].some((failed) => providerValidationTargetApplies(failed, target)))) &&
   (provider.lastValidatedAt === undefined ||
     (target !== undefined &&
       provider.lastValidatedTarget !== undefined &&
-      !providerValidationTargetMatches(provider.lastValidatedTarget, target)) ||
+      !providerValidationTargetApplies(provider.lastValidatedTarget, target)) ||
     provider.lastValidationFailure.at >= provider.lastValidatedAt)
 
 export const providerValidationSucceeded = (
@@ -479,7 +504,7 @@ export const providerValidationSucceeded = (
 ): boolean =>
   provider.lastValidatedAt !== undefined &&
   (provider.lastValidatedTarget === undefined ||
-    providerValidationTargetMatches(provider.lastValidatedTarget, target)) &&
+    providerValidationTargetApplies(provider.lastValidatedTarget, target)) &&
   !providerValidationFailed(provider, target)
 
 // How much reasoning effort the user asks the agent to spend. 'default' means "don't override": the
@@ -516,6 +541,10 @@ export const DEFAULT_SUBAGENT_MODEL_CONFIGURATION: SubagentModelConfiguration = 
 // Reviewer uses the same compound provider/model/effort selection shape as direct Subagents, but
 // keeps an independent persisted policy and runtime admission path.
 export type ReviewerModelConfiguration = SubagentModelConfiguration
+
+// Prompt optimization uses the same provider/model policy shape as other fixed scenarios. Inherit
+// keeps existing installations on the active composer model until the user chooses a dedicated one.
+export type PromptOptimizationModelConfiguration = SubagentModelConfiguration
 
 export const DEFAULT_REVIEWER_MODEL_CONFIGURATION: ReviewerModelConfiguration = Object.freeze({
   mode: 'inherit'
@@ -660,6 +689,7 @@ export type SettingsSnapshot = {
   reasoningEffort: ReasoningEffort
   subagentModel?: SubagentModelConfiguration
   reviewerModel?: ReviewerModelConfiguration
+  promptOptimizationModel?: PromptOptimizationModelConfiguration
   sessionDetailsModel?: SessionDetailsModelConfiguration
   visionModel?: VisionModelConfiguration
   // Whether the app posts an OS notification when an agent task finishes or fails while unfocused.
@@ -696,6 +726,7 @@ export type SetNotebookNetworkRequest = NotebookNetworkSettings & {
   // The renderer's allowed-domain baseline. The owner applies the draft's add/remove delta to the
   // latest stored policy so a concurrent conversation approval cannot be overwritten by a stale form.
   baseAllowedDomains?: readonly string[]
+  revokeNetworkGrantIds?: readonly string[]
   baseTrustedPrivateDestinations?: NotebookNetworkSettings['trustedPrivateDestinations']
 }
 
@@ -715,6 +746,10 @@ export type SetSubagentModelRequest = {
 
 export type SetReviewerModelRequest = {
   configuration: ReviewerModelConfiguration
+}
+
+export type SetPromptOptimizationModelRequest = {
+  configuration: PromptOptimizationModelConfiguration
 }
 
 export type SetSessionDetailsModelRequest = {
@@ -776,6 +811,7 @@ export type Preflight = {
   codebuddyReady: boolean
   codexReady: boolean
   // Missing on older Main processes; Pi is selectable only when Main reports true.
+  openScienceAgentReady?: boolean
   piReady?: boolean
   // Missing on older Main processes; Devin is selectable only when Main reports true.
   devinReady?: boolean
@@ -1243,6 +1279,7 @@ export type SettingsWriteErrorCode =
   | 'agent-framework'
   | 'reasoning-effort'
   | 'reviewer-model'
+  | 'prompt-optimization-model'
   | 'session-details-model'
   | 'subagent-model'
   | 'vision-model'
@@ -1850,4 +1887,52 @@ export const parseSettingsSnapshot = (snapshot: unknown): SettingsSnapshot => {
   )
     throw new ApplicationCommandError('invalid-command-result', 'Invalid settings snapshot.')
   return snapshot as SettingsSnapshot
+}
+
+// Same route vocabulary as backend planning; callers supply the selected model's endpoints.
+export const providerValidationRoute = (
+  provider: {
+    type: ProviderType
+    apiEndpoints?: readonly ModelProtocol[]
+    vendorId?: OfficialVendorId
+    baseUrl?: string
+    chatCompletionsBaseUrl?: string
+    needsChatResponsesToChatCompletionsBridge?: boolean
+    needsNativeResponsesCompatibility?: boolean
+  },
+  frameworkId: AgentFrameworkId
+): Pick<ProviderValidationTarget, 'frameworkId' | 'route'> => {
+  const endpoints = providerEndpoints(provider)
+  let route: AgentModelRoute
+  switch (frameworkId) {
+    case 'claude-code':
+      route = 'claude-anthropic'
+      break
+    case 'opencode':
+      route = endpoints.includes('chat-completions') ? 'opencode-openai' : 'opencode-anthropic'
+      break
+    case 'codebuddy':
+      route = 'codebuddy-openai'
+      break
+    case 'pi':
+      route = 'pi'
+      break
+    case 'open-science-agent':
+      route = 'open-science-agent'
+      break
+    case 'codex':
+      route =
+        (provider.needsChatResponsesToChatCompletionsBridge ?? !endpoints.includes('responses'))
+          ? 'codex-bridge'
+          : (provider.needsNativeResponsesCompatibility ??
+              (!isCodexSubscriptionProvider(provider.type) &&
+                provider.vendorId !== 'openai' &&
+                !isOfficialOpenAiResponsesBase(
+                  provider.chatCompletionsBaseUrl ?? provider.baseUrl
+                )))
+            ? 'codex-responses-compatibility'
+            : 'codex-responses'
+      break
+  }
+  return { frameworkId, route }
 }

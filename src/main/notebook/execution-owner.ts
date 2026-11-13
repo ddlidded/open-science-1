@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { resourceActivity } from '../resource-diagnostics/activity'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
@@ -38,6 +39,7 @@ import { getAppClaudeConfigDir } from '../settings/provider-env'
 import { NotebookDataExecutionAdmissionOwner } from './data-execution-admission'
 import type { NotebookHelperModuleHost, NotebookHelperModuleScope } from './helper-module-host'
 import type { TransientViewImage } from './execution-model-contract'
+import { HostViewImageError } from './host-view-image-service'
 import { getNotebookInputRoot } from './input-staging'
 import { notebookLaneKey, notebookLaneScope } from './lane-identity'
 import { detectManagedRuntimeMutation } from './managed-runtime-guard'
@@ -78,6 +80,7 @@ type NotebookControlResult = Pick<
 > & {
   status: Exclude<NotebookRunStatus, 'queued' | 'running'>
   viewImages?: readonly TransientViewImage[]
+  viewImageError?: 'evidence-unavailable'
 }
 
 type NotebookControlCompletionInterceptor = {
@@ -644,43 +647,45 @@ class NotebookExecutionOwner {
       // The admission promise is an internal replay seam. The primary execution promise remains the
       // public error surface, so admission failures must not become unhandled when no retry is waiting.
       void admitted.catch(() => undefined)
-      const promise = (async () => {
-        if (executionRequest.executionInvocationId) {
-          const existing = await this.options.runTerminalization.findSubmission(
-            session,
-            submissionIdentity
-          )
-          if (existing) {
-            if (existing.submissionFingerprint !== submissionFingerprint) {
-              throw new NotebookRunSubmissionConflictError(submissionIdentity)
+      const promise = resourceActivity
+        .run(async () => {
+          if (executionRequest.executionInvocationId) {
+            const existing = await this.options.runTerminalization.findSubmission(
+              session,
+              submissionIdentity
+            )
+            if (existing) {
+              if (existing.submissionFingerprint !== submissionFingerprint) {
+                throw new NotebookRunSubmissionConflictError(submissionIdentity)
+              }
+              resolveAdmitted(existing)
+              onAdmitted?.(existing)
+              const dependencyProjection = await this.options
+                .projectDependencies(session, existing)
+                .catch(() => unavailableNotebookDependencyProjection([existing]))
+              return { run: existing, dependencyProjection }
             }
-            resolveAdmitted(existing)
-            onAdmitted?.(existing)
-            const dependencyProjection = await this.options
-              .projectDependencies(session, existing)
-              .catch(() => unavailableNotebookDependencyProjection([existing]))
-            return { run: existing, dependencyProjection }
           }
-        }
-        runId ??= this.options.runTerminalization.allocateRunIdentity().runId
-        return this.executeDataCellDurable(
-          session,
-          cell,
-          executionRequest,
-          runId,
-          submissionIdentity,
-          submissionFingerprint,
-          signal,
-          executionHelperIds,
-          (run) => {
-            resolveAdmitted(run)
-            onAdmitted?.(run)
-          }
-        )
-      })().catch((error) => {
-        rejectAdmitted(error)
-        throw error
-      })
+          runId ??= this.options.runTerminalization.allocateRunIdentity().runId
+          return this.executeDataCellDurable(
+            session,
+            cell,
+            executionRequest,
+            runId,
+            submissionIdentity,
+            submissionFingerprint,
+            signal,
+            executionHelperIds,
+            (run) => {
+              resolveAdmitted(run)
+              onAdmitted?.(run)
+            }
+          )
+        })
+        .catch((error) => {
+          rejectAdmitted(error)
+          throw error
+        })
       const entry = { fingerprint: submissionFingerprint, admitted, promise }
       this.activeDataSubmissions.set(submissionKey, entry)
       try {
@@ -1093,40 +1098,42 @@ class NotebookExecutionOwner {
       resolveExecutionSettled = resolve
     })
     if (onExecutionSettled) void executionSettled.then(onExecutionSettled)
-    const promise = (async () => {
-      if (request.executionInvocationId) {
-        const existing = await this.options.runTerminalization.findSubmission(
-          session,
-          submissionIdentity
-        )
-        if (existing) {
-          if (existing.submissionFingerprint !== submissionFingerprint) {
-            throw new NotebookRunSubmissionConflictError(submissionIdentity)
+    const promise = resourceActivity
+      .run(async () => {
+        if (request.executionInvocationId) {
+          const existing = await this.options.runTerminalization.findSubmission(
+            session,
+            submissionIdentity
+          )
+          if (existing) {
+            if (existing.submissionFingerprint !== submissionFingerprint) {
+              throw new NotebookRunSubmissionConflictError(submissionIdentity)
+            }
+            resolveAdmitted(existing)
+            onAdmitted?.(existing)
+            return controlResultFromRun(existing)
           }
-          resolveAdmitted(existing)
-          onAdmitted?.(existing)
-          return controlResultFromRun(existing)
         }
-      }
-      const identity = initialIdentity ?? this.options.runTerminalization.allocateRunIdentity()
-      return this.executeControlDurable(
-        session,
-        request,
-        identity.runId,
-        identity.sequence,
-        submissionIdentity,
-        submissionFingerprint,
-        signal,
-        (run) => {
-          resolveAdmitted(run)
-          onAdmitted?.(run)
-        },
-        resolveExecutionSettled
-      )
-    })().catch((error) => {
-      rejectAdmitted(error)
-      throw error
-    })
+        const identity = initialIdentity ?? this.options.runTerminalization.allocateRunIdentity()
+        return this.executeControlDurable(
+          session,
+          request,
+          identity.runId,
+          identity.sequence,
+          submissionIdentity,
+          submissionFingerprint,
+          signal,
+          (run) => {
+            resolveAdmitted(run)
+            onAdmitted?.(run)
+          },
+          resolveExecutionSettled
+        )
+      })
+      .catch((error) => {
+        rejectAdmitted(error)
+        throw error
+      })
     const entry = { fingerprint: submissionFingerprint, admitted, executionSettled, promise }
     this.activeControlSubmissions.set(submissionKey, entry)
     try {
@@ -1285,8 +1292,16 @@ class NotebookExecutionOwner {
         session.discardControlInvocation(controlInvocationId)
         return result
       }
-      const viewImages = await session.completeControlInvocation(controlInvocationId)
-      return viewImages.length > 0 ? { ...result, viewImages } : result
+      try {
+        const viewImages = await session.completeControlInvocation(controlInvocationId, signal)
+        return viewImages.length > 0 ? { ...result, viewImages } : result
+      } catch (error) {
+        if (signal?.aborted || !(error instanceof HostViewImageError)) throw error
+        return {
+          ...result,
+          viewImageError: 'evidence-unavailable'
+        }
+      }
     } catch (error) {
       session.discardControlInvocation(controlInvocationId)
       throw error
@@ -1577,7 +1592,7 @@ class NotebookExecutionOwner {
     // The admission promise is an internal replay seam. The primary execution promise remains the
     // public error surface, so admission failures must not become unhandled when no retry is waiting.
     void admitted.catch(() => undefined)
-    const promise = (async (): Promise<NotebookShellResult> => {
+    const promise = resourceActivity.run(async (): Promise<NotebookShellResult> => {
       if (request.executionInvocationId) {
         const existing = await this.options.runTerminalization.findSubmission(
           session,
@@ -1892,7 +1907,7 @@ class NotebookExecutionOwner {
           finishLifecycle()
         }
       }
-    })()
+    })
     // Fail duplicate callers waiting for admission even when an error occurs before durable admit.
     void promise.catch(rejectAdmitted)
     const entry = { fingerprint: submissionFingerprint, admitted, promise }

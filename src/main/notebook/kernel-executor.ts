@@ -1,4 +1,7 @@
 import { createLogger } from '@aipoch/diagnostics/node'
+import type { analyzeNotebookSourceFileAccess } from '@aipoch/notebook-analysis'
+import { observeResourceProcess, recordResourceEvent } from '../resource-diagnostics/recorder'
+import { resourceActivity } from '../resource-diagnostics/activity'
 import { resolveExternalRLibrary } from '@aipoch/environment'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -142,11 +145,9 @@ type IdleTimerHandle = unknown
 type ScheduleIdleTimer = (fn: () => void, ms: number) => IdleTimerHandle
 type CancelIdleTimer = (handle: IdleTimerHandle) => void
 
-// Idle-shutdown is OFF by default: a notebook kernel is a PERSISTENT namespace (the agent is told to
-// reuse variables across cells), so silently dropping it after a pause — then respawning a fresh,
-// empty namespace on the next cell — makes a long analysis fail unpredictably. Reclaiming an idle
-// kernel is opt-in via OPEN_SCIENCE_KERNEL_IDLE_MS (a positive ms value); 0 / unset keeps kernels
-// alive until an explicit shutdown/restart or session teardown.
+// The executor-level request timer is off by default. Application composition explicitly disables
+// it and uses NotebookIdleReclamation, which also protects model turns and background activity.
+// Direct executor consumers can still opt into this legacy timer via OPEN_SCIENCE_KERNEL_IDLE_MS.
 const DEFAULT_IDLE_MS = 0
 const DEFAULT_CANCELLATION_GRACE_MS = 2_000
 const DEFAULT_NAMESPACE_INSPECTION_TIMEOUT_MS = 5_000
@@ -205,10 +206,9 @@ const createBoundedKernelOutput = (onLimit: (error: Error) => void): Transform =
   })
 }
 
-// Resolves the idle window: an explicit option wins, then OPEN_SCIENCE_KERNEL_IDLE_MS (a positive ms
-// value opts INTO idle reclaim), else DEFAULT_IDLE_MS (0 = disabled). A value <= 0 disables idle
-// shutdown, so kernels persist until an explicit teardown — see DEFAULT_IDLE_MS for why that is the
-// default.
+// Resolves the request-level idle window: explicit option, then OPEN_SCIENCE_KERNEL_IDLE_MS,
+// then DEFAULT_IDLE_MS. Non-positive values disable this timer; application session-aware
+// reclamation remains independent of it.
 const resolveIdleTimeoutMs = (configured?: number): number => {
   if (configured !== undefined) return configured
   const raw = Number(process.env.OPEN_SCIENCE_KERNEL_IDLE_MS)
@@ -270,6 +270,8 @@ export type NotebookKernelExecutorOptions = {
   // Process-ownership boundary injections keep post-exit identity/reaping tests deterministic.
   registerOwnedProcessGroup?: typeof trackOwnedPosixProcessTree
   terminateTree?: typeof terminateProcessTree
+  // Lets the application move large source file-access analysis off the main event loop.
+  analyzeSourceFileAccess?: typeof analyzeNotebookSourceFileAccess
 }
 
 // One in-flight request awaiting a matching loop response line.
@@ -302,7 +304,10 @@ type ProcState = {
   child: ChildProcessWithoutNullStreams
   readline: Interface
   pending?: PendingRequest
-  beginSandboxExecution: () => () => void
+  beginSandboxExecution: NonNullable<
+    import('./process-sandbox').NotebookSandboxedSpawn['beginExecution']
+  >
+  waitForNetworkApprovals?: () => Promise<void>
   stderrTail: string
   annotateStderr: (stderr: string) => string
   teardownProcess: () => Promise<ProcessTreeKillResult>
@@ -534,6 +539,18 @@ const helperInitializationError = (
 // NotebookExecutionResult (mapLoopOutputs). The python/r data loops and the repl control loop coexist
 // as independent processes; the requested kind never triggers a restart of another.
 class NotebookKernelExecutor implements NotebookExecutor {
+  idleProcesses(): ReturnType<NonNullable<NotebookExecutor['idleProcesses']>> {
+    return Array.from(this.procs.values(), (proc) => ({
+      identity: proc,
+      processKey: proc.key,
+      release: async () => {
+        if (this.procs.get(proc.key) !== proc || !proc.alive || proc.pending) return false
+        await this.terminate(proc.kind, proc.env)
+        return true
+      }
+    }))
+  }
+
   private readonly procs = new Map<ProcessKey, ProcState>()
   // In-flight process-tree teardowns, keyed by the process key of the proc being reaped. A dropped
   // proc's tree is killed asynchronously; ensureProc awaits any pending teardown for a key before
@@ -569,6 +586,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
   private readonly registerOwnedProcessGroup: typeof trackOwnedPosixProcessTree
   private readonly canTrackPosixProcesses: boolean
   private readonly terminateTree: typeof terminateProcessTree
+  private readonly analyzeSourceFileAccess?: typeof analyzeNotebookSourceFileAccess
 
   constructor(options: NotebookKernelExecutorOptions = {}) {
     this.pythonLoopPath = options.pythonLoopPath ?? defaultPythonLoopPath()
@@ -587,6 +605,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
     this.processSandbox = options.processSandbox
     this.processLifecycle = options.processLifecycle
     this.laneKey = options.laneKey
+    this.analyzeSourceFileAccess = options.analyzeSourceFileAccess
     this.registerOwnedProcessGroup = options.registerOwnedProcessGroup ?? trackOwnedPosixProcessTree
     this.canTrackPosixProcesses =
       process.platform !== 'win32' || options.registerOwnedProcessGroup !== undefined
@@ -595,6 +614,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
 
   // Sends one cell to the kind's loop and resolves with the mapped execution result.
   async execute(request: NotebookExecutionRequest): Promise<NotebookExecutionResult> {
+    const endObservation = resourceActivity.begin()
     let workingFileObservation: WorkingFileObservation | undefined
     let kernelDispatched = false
     let cwdBefore: string | undefined
@@ -609,7 +629,17 @@ class NotebookKernelExecutor implements NotebookExecutor {
 
       const proc = await this.ensureProc(key, kind, env, request)
       if (proc.pending) throw new Error('Notebook execution is already running.')
-      endSandboxExecution = proc.beginSandboxExecution()
+      endSandboxExecution = proc.beginSandboxExecution({
+        commandText: request.code,
+        executionReference: request.runId ?? randomUUID(),
+        signal: request.signal,
+        onNetworkWaitChange: (waiting) => {
+          const pending = proc.pending
+          if (!pending?.timeout || pending.timeout.timedOut) return
+          pending.timeout.disarm()
+          if (!waiting && pending.timeoutMs !== undefined) pending.timeout.arm(pending.timeoutMs)
+        }
+      })
       if (kind !== 'repl') {
         cwdBefore = proc.cwd
         request = { ...request, cwd: cwdBefore }
@@ -656,20 +686,23 @@ class NotebookKernelExecutor implements NotebookExecutor {
         }
       }
       const replBindings = kind === 'repl' ? await prepareReplCellBindings(request.code) : undefined
-      workingFileObservation = await startWorkingFileObservation({
-        ...request,
-        ...(kind === 'repl'
-          ? {
-              sourceFileAccessContext: {
-                staticStrings: [],
-                staticCollections: [],
-                localFileWrappers: [],
-                ...request.sourceFileAccessContext,
-                replPersistentBindings: true
+      workingFileObservation = await startWorkingFileObservation(
+        {
+          ...request,
+          ...(kind === 'repl'
+            ? {
+                sourceFileAccessContext: {
+                  staticStrings: [],
+                  staticCollections: [],
+                  localFileWrappers: [],
+                  ...request.sourceFileAccessContext,
+                  replPersistentBindings: true
+                }
               }
-            }
-          : {})
-      })
+            : {})
+        },
+        { analyzeSourceFileAccess: this.analyzeSourceFileAccess }
+      )
       // sendRequest installs proc.pending synchronously. Revalidate immediately before that handoff:
       // an involuntary drop while ensureProc was finishing must settle this execute() locally rather
       // than dispatching to a stale child whose guarded exit handler can no longer reject the run.
@@ -687,6 +720,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
         },
         replBindings
       )
+      await proc.waitForNetworkApprovals?.()
       const status = cancelled
         ? 'cancelled'
         : timedOut
@@ -759,7 +793,11 @@ class NotebookKernelExecutor implements NotebookExecutor {
           : {})
       }
     } finally {
-      endSandboxExecution?.()
+      try {
+        endSandboxExecution?.()
+      } finally {
+        endObservation()
+      }
     }
   }
 
@@ -936,6 +974,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
       child,
       readline,
       beginSandboxExecution: spawned.beginSandboxExecution,
+      waitForNetworkApprovals: spawned.waitForNetworkApprovals,
       stderrTail: '',
       annotateStderr: spawned.annotateStderr,
       teardownProcess: spawned.teardownProcess,
@@ -1069,7 +1108,10 @@ class NotebookKernelExecutor implements NotebookExecutor {
   ): Promise<{
     child: ChildProcessWithoutNullStreams
     cwd: string
-    beginSandboxExecution: () => () => void
+    beginSandboxExecution: NonNullable<
+      import('./process-sandbox').NotebookSandboxedSpawn['beginExecution']
+    >
+    waitForNetworkApprovals?: () => Promise<void>
     annotateStderr: (stderr: string) => string
     teardownProcess: () => Promise<ProcessTreeKillResult>
     cleanupSandbox: (
@@ -1117,7 +1159,12 @@ class NotebookKernelExecutor implements NotebookExecutor {
       loopPath = this.replLoopPath
       // Node otherwise realpaths the main module before loading it. A Windows AppContainer can read
       // the explicitly granted script but cannot enumerate its drive root or unrelated ancestors.
-      args = [...(this.platform === 'win32' ? ['--preserve-symlinks-main'] : []), loopPath]
+      // The sandbox opts into env proxies; keep that runtime advisory out of cell output.
+      args = [
+        '--disable-warning=UNDICI-EHPA',
+        ...(this.platform === 'win32' ? ['--preserve-symlinks-main'] : []),
+        loopPath
+      ]
     } else {
       // Data kernel (python/r). The loop SCRIPT is chosen by kind; the INTERPRETER is either resolved
       // by the Runtime Registry (a managed env bin, or an external/overlay interpreter for BYO) or,
@@ -1238,6 +1285,14 @@ class NotebookKernelExecutor implements NotebookExecutor {
     // One owner supplies both executor and sandbox admission with evidence for this exact spawn.
     // Keep successful proof before settling the receipt; failed observations remain retryable.
     const teardownProcess = async (): Promise<ProcessTreeKillResult> => {
+      recordResourceEvent('kernel-teardown-started', {
+        kernelEpochId,
+        sessionId: request.sessionId,
+        projectId: request.projectId,
+        kind,
+        pid: child?.pid,
+        attempt: terminationAttempt + 1
+      })
       if (!processProof) {
         const attempt = ++terminationAttempt
         const proof = (async () => {
@@ -1308,6 +1363,16 @@ class NotebookKernelExecutor implements NotebookExecutor {
                 }
               : {}),
             ...result
+          })
+          recordResourceEvent('kernel-teardown-proof', {
+            kernelEpochId,
+            sessionId: request.sessionId,
+            projectId: request.projectId,
+            kind,
+            pid: child.pid,
+            attempt,
+            osReaped: osResult.reaped,
+            reaped: result.reaped
           })
           return result
         })()
@@ -1382,14 +1447,17 @@ class NotebookKernelExecutor implements NotebookExecutor {
           processKey: kind === 'repl' ? 'repl' : `${kind}:${env}`,
           kernelEpochId
         },
-        ownerToken
+        ownerToken,
+        sandboxed?.processTreeProof
       )
     }
     const kernelExecutable = sandboxed?.executable ?? invocation.executable
     const kernelArgs = sandboxed?.args ?? invocation.args
     const spawnExecutable = ownershipIntent ? process.execPath : kernelExecutable
+    // This Node host inherits the proxy opt-in even for Python/R, and shares the cell's stderr.
     const spawnArgs = ownershipIntent
       ? [
+          '--disable-warning=UNDICI-EHPA',
           this.processHostPath,
           ownershipIntent.path,
           ownershipIntent.record.receiptId,
@@ -1439,6 +1507,27 @@ class NotebookKernelExecutor implements NotebookExecutor {
       throw error
     }
     child.once('spawn', () => spawnAdmission?.started())
+    try {
+      // laneKey is the existing owner's serialized identity, not a path or an inferred session.
+      const lane = JSON.parse(this.laneKey ?? '[]') as unknown[]
+      observeResourceProcess(
+        child,
+        {
+          kernelEpochId,
+          sessionId: request.sessionId ?? lane[1],
+          projectId: request.projectId ?? lane[0],
+          kind,
+          role: 'notebook',
+          lane: lane[2],
+          frameId: lane[3],
+          attempt: lane[4],
+          receiptId: ownershipIntent?.record.receiptId
+        },
+        () => terminationAttempt > 0
+      )
+    } catch {
+      /* Missing diagnostic lane metadata cannot affect process admission. */
+    }
     child.once('error', () => spawnAdmission?.notStarted())
     if (this.platform !== 'win32' && this.canTrackPosixProcesses)
       this.registerOwnedProcessGroup(child, processTreeOwnership.token)
@@ -1507,6 +1596,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
       child,
       cwd: spawnCwd ?? process.cwd(),
       beginSandboxExecution: sandboxed?.beginExecution ?? (() => () => undefined),
+      waitForNetworkApprovals: sandboxed?.waitForNetworkApprovals,
       annotateStderr: sandboxed?.annotateStderr ?? ((stderr) => stderr),
       teardownProcess,
       cleanupSandbox

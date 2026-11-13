@@ -1,5 +1,9 @@
+import { usePromptOptimization } from './composer/use-prompt-optimization'
+
+import { ResearchVideoButton } from '../../components/research-video-button'
 import type { TFunction } from 'i18next'
 import { ComposerNoticeSlot } from '@/components/composer-notice/ComposerNoticeSlot'
+import type { SessionWriteIssue } from '@/lib/session-persistence/session-write-recovery'
 import { useComposerNotices } from '@/lib/composer-notice/use-composer-notices'
 import {
   formatNoticeDiagnostics,
@@ -14,7 +18,10 @@ import {
   SplitButtonContent
 } from '@/components/ui/split-button'
 import type { AgentAuthenticationRecovery } from './use-agent-authentication-recovery'
-import { pendingWorkspaceElicitations } from '@/lib/acp/useWorkspaceElicitation'
+import {
+  pendingWorkspaceElicitations,
+  useWorkspaceElicitationFailures
+} from '@/lib/acp/useWorkspaceElicitation'
 import { useWorkspaceOperationErrors } from '@/lib/acp/workspace-operation-error'
 import {
   PackageExportProgressButton,
@@ -27,16 +34,18 @@ import { sessionExportLocked, usePackageOperationStore } from '@/stores/package-
 import { replayAnnotationTarget } from '../../../../shared/replay-reference'
 import { composerContextRowClassName } from './SessionDiscussionBar'
 import { SessionDiscussionButton } from './SessionDiscussionButton'
+import { discussionDraftAnnotations } from './discussion-send-context'
 import { SessionDiscussionSource } from './SessionDiscussionSource'
 import { SessionHeaderMenu } from './SessionHeaderMenu'
 import { SessionInfoPopover } from './SessionInfoPopover'
+import { isImportedSession } from './session-action-menu'
 import { AnnotationTransferSource } from './annotations/AnnotationTransferSource'
 import { useAnnotationDrop } from './annotations/use-annotation-drop'
 import { mentionProjectFile } from './project-file-mention'
 import { UnavailablePlanNotice } from './session-plan/UnavailablePlanNotice'
 import { sideChatBlock, sideChatBlockMessage } from './side-chat-availability'
 import { useProjectFileMentionDrop } from './use-project-file-mention-drop'
-import { createSessionReplayItem } from './workspace-session-actions'
+import { createSessionReplayItem, DISCUSSION_DRAFT_CONFLICT } from './workspace-session-actions'
 
 /* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
 import { NotificationBell } from '@/components/NotificationBell'
@@ -91,6 +100,8 @@ import {
   ScanEye,
   Square,
   Stethoscope,
+  Undo2,
+  WandSparkles,
   X
 } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -234,8 +245,9 @@ const attachmentLimitsText = (t: TFunction): string =>
 
 const ResizableElicitationComposer = ({
   children,
-  choice
-}: React.PropsWithChildren<{ choice: boolean }>): React.JSX.Element => {
+  choice,
+  collapsed
+}: React.PropsWithChildren<{ choice: boolean; collapsed: boolean }>): React.JSX.Element => {
   const { t } = useTranslation()
   return (
     <ResizableBottomPanel
@@ -246,6 +258,7 @@ const ResizableElicitationComposer = ({
       minimumContentSelector='[data-elicitation-option-row="true"]'
       minimumContentIndex={1}
       contentScrollSelector={choice ? '[data-testid="elicitation-options"]' : undefined}
+      collapsed={collapsed}
     >
       {children}
     </ResizableBottomPanel>
@@ -326,6 +339,7 @@ type ConversationPanelView = {
   canEditLocalDraft?: boolean
   sendPreparing?: boolean
   persistenceBlocked?: boolean
+  persistenceIssue?: SessionWriteIssue
   actionError: string | null
   sideChatDisabledReason?: string
   sessionImport?: { projectId: string; projectName?: string; canImport: boolean }
@@ -430,6 +444,7 @@ type ConversationPanelSessionTools = {
   menuBindings?: React.ComponentProps<typeof SessionHeaderMenu>['bindings']
   exportDiagnostics?: (session: ChatSession) => void
   newConversation?: () => void
+  reviewPersistence?: () => void
   togglePin?: (session: ChatSession) => void
   editSession?: (session: ChatSession) => void
   notebookReference: NotebookSessionReference | undefined
@@ -486,6 +501,7 @@ const ConversationPanel = ({
     canEditDraft,
     canEditLocalDraft = canEditDraft,
     persistenceBlocked,
+    persistenceIssue,
     actionError,
     sideChatDisabledReason,
     sessionImport
@@ -502,6 +518,7 @@ const ConversationPanel = ({
       attachments,
       transfers: attachmentTransfers,
       error: composerError,
+      errorFailure: composerFailure,
       errorDetail: composerErrorDetail,
       historyStatus,
       isHistoryBrowsing,
@@ -532,6 +549,9 @@ const ConversationPanel = ({
       dismissAutomaticReading
     }
   } = composer
+  const discussionAnnotations = discussionDraftAnnotations(activeSession, annotations).filter(
+    (item) => replayAnnotationTarget(item)
+  )
   // Stable identities across re-renders: the transcript memo compares these callbacks, so an
   // inline closure would re-render every message on each composer state change.
   const annotationSourceId = `main:${activeSession?.projectId}:${activeSession?.id}:${composerFocusKey ?? 'composer'}`
@@ -586,8 +606,11 @@ const ConversationPanel = ({
   )
   const onValidatedDraftDocChange = (
     nextDoc: Parameters<typeof onDraftDocChange>[0],
-    caret?: Parameters<typeof onDraftDocChange>[1]
+    caret?: Parameters<typeof onDraftDocChange>[1],
+    userEdit = true
   ): void => {
+    if (userEdit && JSON.stringify(nextDoc) !== JSON.stringify(draftDoc))
+      promptOptimization.edited()
     if (caret) onDraftDocChange(nextDoc, caret)
     else onDraftDocChange(nextDoc)
     const validation = validateAnnotations(annotations, docToText(nextDoc))
@@ -694,15 +717,18 @@ const ConversationPanel = ({
   const onSpecialistChange = specialist.actions.selectSpecialist
   const onReconfigureChooseOther = specialist.actions.chooseOtherSpecialist
   const onReconfigureUseNone = specialist.actions.useMainAgent
-  const onSendMessage = (forcedSkillIds: string[]): void => submitDraft({ forcedSkillIds })
+  const submitOptimizedDraft: typeof submitDraft = (options) => {
+    submitDraft({ ...options, onAccepted: promptOptimization.sent })
+  }
+  const onSendMessage = (forcedSkillIds: string[]): void => submitOptimizedDraft({ forcedSkillIds })
   const onPlanFirst = (forcedSkillIds: string[]): void =>
-    submitDraft({ forcedSkillIds, mode: 'plan-first' })
+    submitOptimizedDraft({ forcedSkillIds, mode: 'plan-first' })
   const onBranchInNewSession = activeSession
-    ? (forcedSkillIds: string[]): void => submitDraft({ forcedSkillIds, mode: 'branch' })
+    ? (forcedSkillIds: string[]): void => submitOptimizedDraft({ forcedSkillIds, mode: 'branch' })
     : undefined
   const onReconfigureRetry = (): void => {
     if (specialist.actions.retrySpecialistSelection()) return
-    submitDraft({ forcedSkillIds: docToSkillIds(draftDoc), mode: 'retry-reconfigure' })
+    submitOptimizedDraft({ forcedSkillIds: docToSkillIds(draftDoc), mode: 'retry-reconfigure' })
   }
 
   const specialistItems = useSpecialistStore((state) => state.items)
@@ -925,7 +951,10 @@ const ConversationPanel = ({
     !preparationNoticeBaseline.promptMessageId
       ? preparationNoticeBaseline.state
       : activeSession
-  const sessionRecovery = resolveSessionRecoveryPresentation(activeSession)
+  const sessionRecovery = resolveSessionRecoveryPresentation(
+    activeSession,
+    persistenceIssue?.terminalScopes
+  )
   const showSessionRecovery = Boolean(sessionRecovery || isResuming)
   const resolvedRunError = resolveRunError(legacyDisplayState?.error)
   // Anchorless legacy diagnostics remain readable. A hidden or historical turn is still an anchor,
@@ -936,6 +965,21 @@ const ConversationPanel = ({
   const contextResetNotice = useWorkspaceOperationErrors((state) =>
     activeSession ? state.contextResets?.[activeSession.id] : false
   )
+  useNoticeCountdown(
+    contextResetNotice ? 6000 : undefined,
+    false,
+    () => {
+      if (!activeSession) return
+      useWorkspaceOperationErrors.setState(({ contextResets }) => {
+        const next = { ...contextResets }
+        delete next[activeSession.id]
+        return { contextResets: next }
+      })
+    },
+    contextResetNotice ? activeSession?.id : undefined
+  )
+  const persistenceSizeLimit = !persistenceIssue || persistenceIssue.kind === 'size-limit'
+  const persistenceChecking = persistenceIssue?.state === 'checking'
   const operationDiagnostic = useWorkspaceOperationErrors((state) =>
     activeSession ? state.diagnostics[activeSession.id] : undefined
   )
@@ -944,6 +988,32 @@ const ConversationPanel = ({
       ? state.failures?.[activeSession.id]
       : undefined
   )
+  const optimizationProjectId = useNavigationStore((state) => state.activeProjectId)
+  const promptOptimizationModel = useSettingsStore((state) => state.promptOptimizationModel)
+  const optimizationModelConfiguration =
+    promptOptimizationModel.mode === 'fixed'
+      ? {
+          providerId: promptOptimizationModel.providerId,
+          model: promptOptimizationModel.model,
+          reasoningEffort: promptOptimizationModel.reasoningEffort
+        }
+      : modelConfiguration
+  const promptOptimization = usePromptOptimization({
+    projectId: activeSession?.projectId ?? optimizationProjectId ?? undefined,
+    // WorkspacePage keys this panel by composer identity, preserving its own Session binding.
+    sessionKey: 'composer',
+    modelConfiguration:
+      promptOptimizationModel.mode === 'fixed'
+        ? optimizationModelConfiguration
+        : modelUnavailable
+          ? undefined
+          : optimizationModelConfiguration,
+    attachmentIds: attachments.map(({ id }) => id),
+    transferIds: attachmentTransfers.map(({ transferId }) => transferId),
+    doc: draftDoc,
+    onChange: (doc) => onValidatedDraftDocChange(doc, undefined, false)
+  })
+
   const composerNotices = useComposerNotices({
     sessionId: activeSession?.id,
     authenticationResolved: view.authenticationRecovery?.required === false,
@@ -956,28 +1026,50 @@ const ConversationPanel = ({
         : undefined,
     operations: [
       {
+        id: 'prompt-optimization',
+        message: promptOptimization.tooLong
+          ? t('Shorten your question to optimize it (maximum 16,000 characters).')
+          : promptOptimization.notice === 'failed'
+            ? t('Could not optimize your question. Your draft was kept. Please try again.')
+            : promptOptimization.notice === 'changed'
+              ? t('Your input changed while optimizing. Please try again.')
+              : undefined,
+        failure: {
+          category:
+            promptOptimization.tooLong || promptOptimization.notice !== 'failed'
+              ? 'input'
+              : 'service',
+          reason: promptOptimization.tooLong
+            ? 'input/prompt-optimization-too-long'
+            : promptOptimization.notice === 'failed'
+              ? 'service/prompt-optimization'
+              : 'input/prompt-optimization-changed',
+          diagnostics:
+            !promptOptimization.tooLong && promptOptimization.notice === 'failed'
+              ? (promptOptimization.diagnostics ?? {})
+              : {}
+        }
+      },
+      {
         id: 'action',
         message: actionError,
-        failure: operationFailure,
+        failure: operationFailure ?? (actionError === composerError ? composerFailure : undefined),
         detail:
           operationDiagnostic?.message === actionError ? operationDiagnostic.detail : undefined,
         occurredAt: operationDiagnostic?.occurredAt
       },
       {
         id: 'composer',
-        message: composerError !== actionError ? composerError : undefined,
+        message:
+          composerError !== actionError && composerError !== DISCUSSION_DRAFT_CONFLICT
+            ? composerError
+            : undefined,
+        failure: composerFailure,
         detail: composerErrorDetail
       },
       {
         id: 'authentication',
         message: view.authenticationRecovery?.required ? 'Authentication required' : undefined,
-        blocksSend: true
-      },
-      {
-        id: 'model',
-        message: agentControls.modelUnavailable
-          ? 'No active model provider is configured. Configure one in settings.'
-          : undefined,
         blocksSend: true
       },
       {
@@ -989,17 +1081,6 @@ const ConversationPanel = ({
               reconfigureError.reason ||
               'The agent session could not be reconfigured.'
             : undefined
-      },
-      {
-        id: 'storage',
-        message: persistenceBlocked ? 'Conversation storage limit reached' : undefined,
-        detail: persistenceBlocked
-          ? t(
-              'This conversation exceeded the 256 MiB storage limit. Its current run was stopped. Start a new conversation to keep working. Changes after the last successful save are not durable.'
-            )
-          : undefined,
-        origin: 'environment',
-        blocksSend: true
       }
     ]
   })
@@ -1052,11 +1133,28 @@ const ConversationPanel = ({
   const pendingElicitationActivity = pendingElicitationRequest
     ? sessionActivities.find((activity) => activity.id === pendingElicitationRequest.toolCallId)
     : undefined
+  const continuationFailure = useWorkspaceElicitationFailures((state) =>
+    activeSession ? state.failures[activeSession.id] : undefined
+  )
+  const failedContinuation =
+    pendingElicitationActivity?.elicitation?.continuationPending &&
+    !pendingElicitationActivity.elicitation.continuationRecovery &&
+    continuationFailure?.requestId === pendingElicitationRequest?.requestId
+      ? continuationFailure
+      : undefined
   const pendingElicitation: ElicitationProjection | undefined =
     pendingElicitationActivity?.elicitation &&
     (pendingElicitationActivity.elicitation.state === 'pending' ||
+      pendingElicitationActivity.elicitation.continuationPending ||
       pendingElicitationActivity.elicitation.continuationRecovery)
-      ? pendingElicitationActivity.elicitation
+      ? {
+          ...pendingElicitationActivity.elicitation,
+          ...(failedContinuation
+            ? {
+                continuationRecovery: { error: failedContinuation.error }
+              }
+            : {})
+        }
       : !pendingElicitationActivity && pendingElicitationRequest
         ? {
             message: pendingElicitationRequest.message,
@@ -1115,6 +1213,26 @@ const ConversationPanel = ({
   const packageLocked = sessionExportLocked(packageOperation, activeSession)
   const ordinaryComposerBlocked = Boolean(
     blockingInteraction || packageLocked || authenticationRequired
+  )
+  const pendingChoiceQuestions = resolveAgentUserChoiceQuestions(
+    pendingElicitationRequest?.fields ?? pendingElicitation?.fields ?? []
+  )
+  const elicitationPresentationKey = pendingElicitationRequest
+    ? `${activeSession?.id}:${pendingElicitationRequest.requestId}`
+    : undefined
+  const [elicitationPresentation, setElicitationPresentation] = useState<{
+    key: string | undefined
+    collapsed: boolean
+    focusRequestId: number
+  }>({ key: undefined, collapsed: false, focusRequestId: 0 })
+  const elicitationCollapsed =
+    elicitationPresentation.key === elicitationPresentationKey && elicitationPresentation.collapsed
+  const canRevealElicitation = Boolean(
+    pendingChoiceQuestions &&
+    blockingInteraction === 'elicitation' &&
+    !pendingElicitation?.continuationRecovery &&
+    !authenticationRequired &&
+    !packageLocked
   )
 
   useEffect(() => {
@@ -1265,7 +1383,7 @@ const ConversationPanel = ({
       }
     },
     'open-environment': {
-      run: (notice) => openSettingsToPanel(notice.operation === 'storage' ? 'storage' : 'runtimes')
+      run: () => openSettingsToPanel('runtimes')
     },
     compact: { run: () => onCompactContext(), disabled: () => !canCompactContext },
     'remove-attachments': {
@@ -1449,8 +1567,9 @@ const ConversationPanel = ({
       : t('Opens an empty Side chat; keeps your draft.'))
   const handleSideChat = (): void => {
     if (!canOpenSideChat) return
-    if (sendsSideChatDraft) onStartSideChat()
-    else sideChatController.createDraft?.()
+    if (sendsSideChatDraft) {
+      onStartSideChat(promptOptimization.sent)
+    } else sideChatController.createDraft?.()
   }
   const sideChatMenuItems = (
     <>
@@ -1479,6 +1598,12 @@ const ConversationPanel = ({
     </>
   )
 
+  const handleStageAttachmentFiles = (files: File[]): void => {
+    if (files.length === 0) return
+    promptOptimization.edited()
+    onStageAttachmentFiles(files)
+  }
+
   // Converts the hidden file input selection into the shared staging callback.
   const handleAttachmentInputChange = (event: React.ChangeEvent<HTMLInputElement>): void => {
     const files = Array.from(event.target.files ?? [])
@@ -1487,7 +1612,7 @@ const ConversationPanel = ({
     event.target.value = ''
 
     if (files.length > 0) {
-      onStageAttachmentFiles(files)
+      handleStageAttachmentFiles(files)
     }
   }
 
@@ -1500,10 +1625,11 @@ const ConversationPanel = ({
     if (files.length === 0) return
 
     event.preventDefault()
-    onStageAttachmentFiles(files)
+    handleStageAttachmentFiles(files)
   }
 
   const handleRemoveAttachment = (attachment: (typeof attachments)[number]): void => {
+    promptOptimization.edited()
     onRemoveAttachment(attachment)
     if (pastedTextByAttachmentId.has(attachment.id)) {
       setComposerRestoreFocusRequest((request) => (request ?? 0) + 1)
@@ -1511,6 +1637,7 @@ const ConversationPanel = ({
   }
 
   const handleCancelAttachmentTransfer = (transfer: (typeof attachmentTransfers)[number]): void => {
+    promptOptimization.edited()
     onCancelAttachmentTransfer(transfer)
     if (transfer.pastedTextId) {
       setComposerRestoreFocusRequest((request) => (request ?? 0) + 1)
@@ -1548,7 +1675,7 @@ const ConversationPanel = ({
         projectName={sessionImport?.projectName ?? t('Project')}
         canImport={sessionImport?.canImport ?? false}
         canAttach={canEditDraft && !isUploadingAttachments && !ordinaryComposerBlocked}
-        onFiles={onStageAttachmentFiles}
+        onFiles={handleStageAttachmentFiles}
         data-testid="workspace-file-drop-zone"
         className="relative flex h-full min-w-0 flex-col overflow-hidden bg-bg-10 p-[6px] pl-4 max-md:p-0"
         data-session-id={activeSession?.id ?? ''}
@@ -1576,6 +1703,7 @@ const ConversationPanel = ({
                 sourceSession={sourceSession}
                 onOpenSession={sessionTools.openSession}
                 onEdit={sessionTools.editSession}
+                canTogglePin={!isImportedSession(activeSession)}
                 onTogglePin={sessionTools.togglePin}
               />
             ) : (
@@ -1616,17 +1744,43 @@ const ConversationPanel = ({
               </Tooltip>
             </TooltipProvider>
           )}
-          {activeSession && !activeSession.firstPromptDraft && !activeSession.isPending && (
-            <SessionHeaderMenu
-              key={activeSession.id}
-              session={activeSession}
-              bindings={sessionTools.menuBindings}
-              createSideChat={sideChatController.createDraft}
-              credentialPending={pendingCredentialRequest !== undefined}
-              rootPermissionPending={presentedRootPermissionPending}
-              disabledReason={openSideChatReason}
-            />
-          )}
+          {activeSession &&
+            !activeSession.firstPromptDraft &&
+            !activeSession.isPending &&
+            (isImported ? (
+              <SessionHeaderMenu
+                session={activeSession}
+                bindings={sessionTools.menuBindings}
+                createSideChat={sideChatController.createDraft}
+                credentialPending={pendingCredentialRequest !== undefined}
+                rootPermissionPending={presentedRootPermissionPending}
+                disabledReason={openSideChatReason}
+                key={activeSession.id}
+              />
+            ) : (
+              <ResearchVideoButton
+                key={`${activeSession.id}:${activeSession.conversationGraph?.frames.find((frame) => frame.id === activeSession.conversationGraph?.rootFrameId)?.activeBranchId ?? ''}`}
+                projectId={activeSession.projectId}
+                sessionId={activeSession.id}
+                branchId={
+                  activeSession.conversationGraph?.frames.find(
+                    (frame) => frame.id === activeSession.conversationGraph?.rootFrameId
+                  )?.activeBranchId
+                }
+                renderTrigger={(openResearchExplanation, researchVideoTriggerState) => (
+                  <SessionHeaderMenu
+                    session={activeSession}
+                    bindings={sessionTools.menuBindings}
+                    createSideChat={sideChatController.createDraft}
+                    credentialPending={pendingCredentialRequest !== undefined}
+                    rootPermissionPending={presentedRootPermissionPending}
+                    disabledReason={openSideChatReason}
+                    openResearchExplanation={openResearchExplanation}
+                    researchVideoTriggerState={researchVideoTriggerState}
+                  />
+                )}
+              />
+            ))}
           <PackageExportProgressButton />
           <PackageOperationIndicator />
           <NotificationBell className="md:hidden" />
@@ -1693,6 +1847,19 @@ const ConversationPanel = ({
               canBranchInNewSession={canBranchInNewSession}
               onBranchInNewSession={onBranchFromAgentMessage}
               pendingElicitations={sessionPendingElicitations}
+              pendingElicitationControl={
+                canRevealElicitation && pendingElicitationRequest
+                  ? {
+                      activityId: pendingElicitationRequest.toolCallId,
+                      onReveal: () =>
+                        setElicitationPresentation((current) => ({
+                          key: elicitationPresentationKey,
+                          collapsed: false,
+                          focusRequestId: current.focusRequestId + 1
+                        }))
+                    }
+                  : undefined
+              }
               handoffLifecycleSource={workspaceHandoffLifecycleClient}
               onRetryHandoff={(request) => workspaceHandoffLifecycleClient.retry(request)}
               reportPresentationRevealing
@@ -1736,9 +1903,66 @@ const ConversationPanel = ({
               )}
               <div className="px-1 md:px-3">
                 <ComposerNoticeSlot
+                  draftConflict={
+                    composerError === DISCUSSION_DRAFT_CONFLICT
+                      ? {
+                          description: t(
+                            'Send or clear your current draft before starting a discussion.'
+                          ),
+                          dismissButton: {
+                            label: t('Dismiss'),
+                            onClick: () => onSetComposerError(null)
+                          }
+                        }
+                      : undefined
+                  }
                   notices={composerNotices.notices}
                   handlers={noticeHandlers}
                   onDismiss={composerNotices.dismiss}
+                  persistence={
+                    persistenceBlocked
+                      ? {
+                          role: persistenceChecking ? 'status' : 'alert',
+                          level: persistenceChecking ? 'info' : 'error',
+                          title: persistenceSizeLimit
+                            ? t('Conversation storage limit reached')
+                            : persistenceChecking
+                              ? t('Checking conversation storage…')
+                              : t('Conversation storage needs attention'),
+                          description: persistenceSizeLimit
+                            ? t(
+                                'This conversation exceeded the 256 MiB storage limit. Its current run was stopped. Start a new conversation to keep working. Changes after the last successful save are not durable.'
+                              )
+                            : persistenceChecking
+                              ? t(
+                                  'The connection changed while saving. Checking which conversation changes were saved.'
+                                )
+                              : persistenceIssue.kind === 'conflict'
+                                ? t(
+                                    'This conversation changed in another window. Local changes are retained. Review the conversation, then retry or discard the retained changes.'
+                                  )
+                                : persistenceIssue.kind === 'connection'
+                                  ? t(
+                                      'Some conversation changes could not be confirmed as saved. Review the affected conversations and retry before closing the app.'
+                                    )
+                                  : t(
+                                      'Open-Science could not save the latest conversation changes. Retry before closing the app.'
+                                    ),
+                          primaryButton:
+                            persistenceSizeLimit && sessionTools.newConversation
+                              ? {
+                                  label: t('New conversation'),
+                                  onClick: sessionTools.newConversation
+                                }
+                              : !persistenceChecking && sessionTools.reviewPersistence
+                                ? {
+                                    label: t('Review recovery options'),
+                                    onClick: sessionTools.reviewPersistence
+                                  }
+                                : undefined
+                        }
+                      : undefined
+                  }
                 />
                 {conversation.planProjectionRecoveryError && activeSession ? (
                   <UnavailablePlanNotice
@@ -1831,7 +2055,7 @@ const ConversationPanel = ({
                           : 'jobs'
                     }
                     className={cn(
-                      'flex px-2',
+                      'relative flex min-w-0 px-2',
                       notebookReference || messageQueue.items.length > 0 || hasBookmarkEntry
                         ? 'relative -mb-8 min-h-[68px] items-start rounded-2xl bg-bg-200 pt-1 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-200 motion-safe:ease-out'
                         : 'mb-2 min-h-9 items-center rounded-lg border border-border-200 bg-bg-000 shadow-card',
@@ -1948,11 +2172,8 @@ const ConversationPanel = ({
                         />
                       ) : pendingElicitation ? (
                         <ResizableElicitationComposer
-                          choice={Boolean(
-                            resolveAgentUserChoiceQuestions(
-                              pendingElicitationRequest?.fields ?? pendingElicitation.fields
-                            )
-                          )}
+                          choice={Boolean(pendingChoiceQuestions)}
+                          collapsed={elicitationCollapsed}
                           key={
                             pendingElicitationRequest?.requestId ?? pendingElicitationActivity?.id
                           }
@@ -1961,6 +2182,22 @@ const ConversationPanel = ({
                             elicitation={pendingElicitation}
                             request={pendingElicitationRequest}
                             embedded
+                            collapsed={elicitationCollapsed}
+                            onCollapsedChange={
+                              pendingChoiceQuestions
+                                ? (collapsed) =>
+                                    setElicitationPresentation((current) => ({
+                                      ...current,
+                                      key: elicitationPresentationKey,
+                                      collapsed
+                                    }))
+                                : undefined
+                            }
+                            focusRequestId={
+                              elicitationPresentation.key === elicitationPresentationKey
+                                ? elicitationPresentation.focusRequestId
+                                : 0
+                            }
                             onRespond={onRespondToElicitation}
                             editDraft={
                               pendingElicitationActivity
@@ -2028,15 +2265,53 @@ const ConversationPanel = ({
                       </section>
                     ) : activeSession?.packageOrigin ? (
                       <section
-                        className="relative z-10 rounded-2xl bg-bg-200 p-2"
+                        className="relative z-10 rounded-2xl border border-border-200/70 bg-bg-200 p-2.5"
                         aria-label={t('Imported research history')}
                       >
-                        <div className="flex flex-wrap items-center gap-2">
-                          {sessionForkAvailable() ? (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                            <SessionDiscussionButton
+                              key={activeSession.id}
+                              projectId={activeSession.projectId}
+                              sessionId={activeSession.id}
+                            />
                             <Button
                               variant="outline"
                               size="sm"
                               className="px-2 text-xs"
+                              aria-controls="right-panel"
+                              onClick={() => {
+                                usePreviewWorkbenchStore
+                                  .getState()
+                                  .upsertAndActivateItem(
+                                    createSessionReplayItem(
+                                      activeSession.projectId,
+                                      activeSession.id,
+                                      activeSession.title
+                                    )
+                                  )
+                              }}
+                            >
+                              <Play className="size-4" aria-hidden="true" />
+                              {t('View replay')}
+                            </Button>
+                            <ResearchVideoButton
+                              key={`${activeSession.id}:${activeSession.conversationGraph?.frames.find((frame) => frame.id === activeSession.conversationGraph?.rootFrameId)?.activeBranchId ?? ''}`}
+                              projectId={activeSession.projectId}
+                              sessionId={activeSession.id}
+                              branchId={
+                                activeSession.conversationGraph?.frames.find(
+                                  (frame) =>
+                                    frame.id === activeSession.conversationGraph?.rootFrameId
+                                )?.activeBranchId
+                              }
+                            />
+                          </div>
+                          {sessionForkAvailable() ? (
+                            <Button
+                              variant="default"
+                              size="sm"
+                              className="w-full px-3 text-xs font-semibold sm:w-auto"
                               onClick={() => {
                                 void forkSession(activeSession)
                               }}
@@ -2045,31 +2320,6 @@ const ConversationPanel = ({
                               {t('Fork to continue')}
                             </Button>
                           ) : null}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="px-2 text-xs"
-                            aria-controls="right-panel"
-                            onClick={() => {
-                              usePreviewWorkbenchStore
-                                .getState()
-                                .upsertAndActivateItem(
-                                  createSessionReplayItem(
-                                    activeSession.projectId,
-                                    activeSession.id,
-                                    activeSession.title
-                                  )
-                                )
-                            }}
-                          >
-                            <Play className="size-4" aria-hidden="true" />
-                            {t('View replay')}
-                          </Button>
-                          <SessionDiscussionButton
-                            key={activeSession.id}
-                            projectId={activeSession.projectId}
-                            sessionId={activeSession.id}
-                          />
                         </div>
                         {activeSession.packageOrigin.excludedFiles?.length ? (
                           <details className="group/exclusions mt-1 text-xs text-muted-foreground">
@@ -2159,7 +2409,7 @@ const ConversationPanel = ({
                             aria-hidden="true"
                           />
                         ) : null}
-                        {annotations.some((annotation) => replayAnnotationTarget(annotation)) ||
+                        {discussionAnnotations.length > 0 ||
                         activeSession?.runtimeContext?.sessionContext?.bindings.length ||
                         pdfContext.bindings.length > 0 ||
                         pdfContext.automaticAttachmentCount > 0 ? (
@@ -2168,9 +2418,8 @@ const ConversationPanel = ({
                             data-testid="composer-context-header"
                           >
                             <AnnotationDraftCards
-                              annotations={annotations.filter((annotation) =>
-                                replayAnnotationTarget(annotation)
-                              )}
+                              annotations={discussionAnnotations}
+                              fixedParent={Boolean(activeSession?.parentSessionId)}
                               disabled={!canEditDraft || pdfContext.isPending}
                               onReveal={requestAnnotationReveal}
                               onUpdateNote={onUpdateAnnotationNote}
@@ -2182,6 +2431,7 @@ const ConversationPanel = ({
                             ) ? (
                               <SessionDiscussionSource
                                 key={activeSession.id}
+                                parentSessionId={activeSession.parentSessionId}
                                 projectId={activeSession.projectId}
                                 sessionId={activeSession.id}
                                 context={activeSession.runtimeContext}
@@ -2539,7 +2789,10 @@ const ConversationPanel = ({
                                         type="button"
                                         className={pastedTextRestoreButtonClassName}
                                         disabled={!canEditDraft}
-                                        onClick={() => onRestorePastedText(pastedText.id)}
+                                        onClick={() => {
+                                          promptOptimization.edited()
+                                          onRestorePastedText(pastedText.id)
+                                        }}
                                       >
                                         <span className="w-full truncate whitespace-nowrap text-[12px] leading-4">
                                           {pastedTextPreviewName(pastedText.text)}
@@ -2707,10 +2960,21 @@ const ConversationPanel = ({
                               onDocChange={onValidatedDraftDocChange}
                               onSubmit={handleSubmit}
                               onPaste={handleMessageDraftPaste}
-                              onLongTextPaste={onStagePastedText}
+                              onLongTextPaste={(...args) => {
+                                promptOptimization.edited()
+                                onStagePastedText(...args)
+                              }}
                               onLocatePastedText={handleLocatePastedText}
-                              onUndo={onUndo}
-                              onRedo={onRedo}
+                              onUndo={(...args) => {
+                                const changed = onUndo(...args)
+                                if (changed) promptOptimization.edited()
+                                return changed
+                              }}
+                              onRedo={(...args) => {
+                                const changed = onRedo(...args)
+                                if (changed) promptOptimization.edited()
+                                return changed
+                              }}
                               disabled={!canEditLocalDraft}
                               placeholder={t(
                                 'Ask anything — / skills · @ files · # sessions · {{shortcut}} search · ↑↓ history',
@@ -2723,7 +2987,11 @@ const ConversationPanel = ({
                               onSelectWslSetup={() => void handleWslSetupCommand()}
                               isHistoryBrowsing={isHistoryBrowsing}
                               historyStatus={historyStatus}
-                              onNavigateHistory={onNavigateHistory}
+                              onNavigateHistory={(...args) => {
+                                const changed = onNavigateHistory(...args)
+                                if (changed) promptOptimization.edited()
+                                return changed
+                              }}
                               mentionPreviewContext={
                                 activeSession
                                   ? {
@@ -2738,7 +3006,7 @@ const ConversationPanel = ({
                             />
                           </div>
 
-                          <div className="@container/composer flex items-center gap-1">
+                          <div className="flex flex-wrap items-center gap-1">
                             {/* The + button opens a dropdown for attachments and session actions. */}
                             <DropdownMenu>
                               <>
@@ -3015,6 +3283,64 @@ const ConversationPanel = ({
                               openRequest={agentControlsOpenRequest}
                               computeOpenRequest={computeControlsOpenRequest}
                             />
+
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className={cn(composerIconButtonClassName, 'group/optimize')}
+                                  aria-label={
+                                    promptOptimization.pending
+                                      ? t('Cancel optimization')
+                                      : promptOptimization.canUndo
+                                        ? t('Undo optimization')
+                                        : t('Optimize question')
+                                  }
+                                  disabled={
+                                    !promptOptimization.pending &&
+                                    (!canEditLocalDraft ||
+                                      (!promptOptimization.canUndo &&
+                                        !promptOptimization.canOptimize))
+                                  }
+                                  onClick={() => {
+                                    if (promptOptimization.pending) promptOptimization.cancel()
+                                    else if (promptOptimization.canUndo) promptOptimization.undo()
+                                    else void promptOptimization.optimize()
+                                  }}
+                                >
+                                  {promptOptimization.pending ? (
+                                    <>
+                                      <Loader2
+                                        className="size-4 animate-spin motion-reduce:animate-none group-hover/optimize:hidden group-focus-visible/optimize:hidden"
+                                        strokeWidth={2}
+                                        aria-hidden="true"
+                                      />
+                                      <Square
+                                        className="hidden size-3 fill-current group-hover/optimize:block group-focus-visible/optimize:block"
+                                        aria-hidden="true"
+                                      />
+                                    </>
+                                  ) : promptOptimization.canUndo ? (
+                                    <Undo2 className="size-4" strokeWidth={2} aria-hidden="true" />
+                                  ) : (
+                                    <WandSparkles
+                                      className="size-4"
+                                      strokeWidth={2}
+                                      aria-hidden="true"
+                                    />
+                                  )}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-[11px]">
+                                {promptOptimization.pending
+                                  ? t('Cancel optimization')
+                                  : promptOptimization.canUndo
+                                    ? t('Undo optimization')
+                                    : t('Optimize question')}
+                              </TooltipContent>
+                            </Tooltip>
 
                             <ComposerSpecialistPicker
                               selectedId={specialistId}

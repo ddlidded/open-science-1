@@ -81,6 +81,13 @@ beforeEach(() => {
 })
 
 describe('navigation store', () => {
+  it('defaults Resource Center to Skills while preserving explicit Use Cases navigation', () => {
+    useNavigationStore.getState().openResourceCenter('user')
+    expect(useNavigationStore.getState().resourceCenterIntent).toEqual({ resource: 'skills' })
+    useNavigationStore.getState().openMarketplace('user')
+    expect(useNavigationStore.getState().resourceCenterIntent).toEqual({ resource: 'marketplace' })
+  })
+
   it('returns the latest marketplace filters to the same project without changing its conversation', () => {
     useSessionStore.getState().hydrateSessions([createSession({ id: 'selected' })])
     useSessionStore.setState({ selectedSessionId: 'selected' })
@@ -142,7 +149,7 @@ describe('navigation store', () => {
     expect(useNavigationStore.getState().marketplaceListContext).toBeUndefined()
   })
 
-  it('opens the sharing marketplace as a guarded top-level destination', () => {
+  it('opens the marketplace as a guarded top-level destination', () => {
     useNavigationStore.setState({ view: 'workspace', activeProjectId: 'project-a' })
     usePreviewWorkbenchStore.setState({ activeProjectId: 'project-a', activeItemId: 'file-1' })
     const guard = vi.fn(() => false)

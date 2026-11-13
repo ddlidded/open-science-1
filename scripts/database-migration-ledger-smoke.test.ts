@@ -250,6 +250,18 @@ describe('packaged database migration ledger smoke', () => {
       {
         id: '0054_slurm_job_reliability',
         checksum: '1525c308d5403411490596cf7ad4e03a2fc9ae7ee43adf6d3622d0b17d97319b'
+      },
+      {
+        id: '0055_session_discussion_parent',
+        checksum: '8fc258c3f41f8ce14ad74a58cde8aa53c93bf312a251f6345174b5d06bb65cf1'
+      },
+      {
+        id: '0056_compute_kubernetes_workspace',
+        checksum: '658ff2adbd570b019249e119f3e5579e27c385ab247321311a383ff3739f5e7d'
+      },
+      {
+        id: '0057_project_optimization_prompt',
+        checksum: '226fb954f1b09aeab18527a4562a9a0f5551145edf5259e57513f73c8dbb150e'
       }
     ])
     expect(() => assertApplicationMigrationLedger(MIGRATION_MANIFEST)).not.toThrow()

@@ -3,6 +3,7 @@ export type HistoryReplayTarget =
   | 'opencode'
   | 'codebuddy'
   | 'pi'
+  | 'open-science-agent'
   | 'codex-response'
   | 'codex-bridge'
   | 'devin'

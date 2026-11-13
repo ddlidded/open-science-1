@@ -1,4 +1,7 @@
-import { pendingWorkspaceElicitations } from '@/lib/acp/useWorkspaceElicitation'
+import {
+  pendingWorkspaceElicitations,
+  useWorkspaceElicitationFailures
+} from '@/lib/acp/useWorkspaceElicitation'
 import { applyWorkspaceRuntimeEvent } from '@/lib/acp/workspace-events'
 import {
   reportWorkspaceOperationError,
@@ -237,6 +240,7 @@ vi.mock('./WorkspaceMessageScroller', () => ({
     isResumingSession,
     visiblePermissionPending,
     pendingElicitations = [],
+    pendingElicitationControl,
     onStartResearch,
     activeSession,
     turnOutcomeActions
@@ -248,6 +252,7 @@ vi.mock('./WorkspaceMessageScroller', () => ({
     isResumingSession?: boolean
     visiblePermissionPending?: boolean
     pendingElicitations?: unknown[]
+    pendingElicitationControl?: { activityId: string; onReveal: () => void }
     onStartResearch?: (prompt: string) => void
   }): React.JSX.Element => {
     scrollerProps.turnOutcomeActions = turnOutcomeActions
@@ -273,6 +278,14 @@ vi.mock('./WorkspaceMessageScroller', () => ({
           <span data-testid="resume-progress-indicator">Resuming session</span>
         ) : null}
         <span data-testid="scroller-pending-elicitations">{pendingElicitations.length}</span>
+        {pendingElicitationControl ? (
+          <button
+            data-testid="reveal-pending-elicitation"
+            onClick={pendingElicitationControl.onReveal}
+          >
+            Reveal question
+          </button>
+        ) : null}
         <span data-testid="scroller-credential-pending">{String(credentialPending ?? false)}</span>
         <span data-testid="scroller-visible-permission-pending">
           {String(visiblePermissionPending ?? false)}
@@ -1002,6 +1015,41 @@ describe('ConversationPanel header spacing', () => {
     expect(container.textContent).not.toContain('Conversation storage limit reached')
   })
 
+  it.each(['connection', 'conflict'] as const)(
+    'keeps a %s write explanation and recovery entry local after the global warning closes',
+    (kind) => {
+      const reviewPersistence = vi.fn()
+      renderPanel({
+        view: {
+          persistenceBlocked: true,
+          persistenceIssue: {
+            target: 'session:session-1',
+            sessionId: 'session-1',
+            kind,
+            state: 'failed',
+            canDiscard: true,
+            reviewRequired: true
+          }
+        },
+        sessionTools: { reviewPersistence }
+      })
+
+      expect(container.textContent).not.toContain('256 MiB')
+      expect(container.textContent).not.toContain('Conversation storage limit reached')
+      expect(container.textContent).toContain(
+        kind === 'connection'
+          ? 'Some conversation changes could not be confirmed as saved.'
+          : 'This conversation changed in another window. Local changes are retained.'
+      )
+      const review = [...container.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Review recovery options'
+      )
+      expect(review).toBeDefined()
+      act(() => review!.click())
+      expect(reviewPersistence).toHaveBeenCalledOnce()
+    }
+  )
+
   it('keeps storage, turn and operation errors independent above the composer', () => {
     const activeSession: ChatSession = {
       id: 'blocked-failed-turn',
@@ -1031,11 +1079,10 @@ describe('ConversationPanel header spacing', () => {
       }
     })
     expect(container.textContent).toContain('Conversation storage limit reached')
-    selectAdditionalNotice()
     expect(container.querySelector('[data-slot="turn-outcome-notice"]')?.textContent).toContain(
       'Admitted turn failed.'
     )
-    selectAdditionalNotice(1)
+    selectAdditionalNotice()
     expect(container.textContent).toContain('Independent operation failed.')
 
     renderPanel({ view: { activeSession, persistenceBlocked: false, actionError: null } })
@@ -1776,6 +1823,8 @@ const hasDropOverlay = (): boolean =>
   container.textContent?.includes('Drop files to attach') ?? false
 
 beforeEach(() => {
+  useWorkspaceOperationErrors.setState({ contextResets: {} })
+  useWorkspaceElicitationFailures.setState({ failures: {} })
   vi.stubGlobal(
     'matchMedia',
     vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
@@ -1826,6 +1875,58 @@ afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
   container.remove()
+})
+
+describe('ConversationPanel context reset notice', () => {
+  const session: ChatSession = {
+    id: 'context-reset',
+    projectId: 'project-a',
+    title: 'Context reset',
+    cwd: '/workspace',
+    status: 'idle',
+    messages: [],
+    createdAt: 1,
+    updatedAt: 1
+  }
+  const notice = 'Continuing in a new context using your saved conversation history.'
+
+  it('expires after six seconds, stays dismissed on return, and allows a later reset', () => {
+    vi.useFakeTimers()
+    useWorkspaceOperationErrors.setState({ contextResets: { [session.id]: true } })
+    renderPanel({ view: { activeSession: session } })
+    act(() => vi.advanceTimersByTime(5999))
+    expect(container.textContent).toContain(notice)
+    renderPanel({ view: { activeSession: { ...session } } })
+    act(() => vi.advanceTimersByTime(1))
+    expect(container.textContent).not.toContain(notice)
+    expect(useWorkspaceOperationErrors.getState().contextResets[session.id]).toBeUndefined()
+
+    renderPanel()
+    renderPanel({ view: { activeSession: session } })
+    expect(container.textContent).not.toContain(notice)
+    act(() => {
+      useWorkspaceOperationErrors.setState({ contextResets: { [session.id]: true } })
+    })
+    expect(container.textContent).toContain(notice)
+    act(() => vi.advanceTimersByTime(6000))
+    expect(container.textContent).not.toContain(notice)
+  })
+
+  it('cancels the previous session timer and expires only the displayed session notice', () => {
+    vi.useFakeTimers()
+    const otherSession = { ...session, id: 'other-context-reset' }
+    useWorkspaceOperationErrors.setState({
+      contextResets: { [session.id]: true, [otherSession.id]: true }
+    })
+    renderPanel({ view: { activeSession: session } })
+    act(() => vi.advanceTimersByTime(3000))
+    renderPanel({ view: { activeSession: otherSession } })
+    act(() => vi.advanceTimersByTime(3000))
+    expect(container.textContent).toContain(notice)
+    act(() => vi.advanceTimersByTime(3000))
+    expect(container.textContent).not.toContain(notice)
+    expect(useWorkspaceOperationErrors.getState().contextResets).toEqual({ [session.id]: true })
+  })
 })
 
 describe('ConversationPanel Specialist reconfigure recovery', () => {
@@ -2896,7 +2997,7 @@ describe('ConversationPanel composer intake', () => {
     expect(elicitationComposer?.classList.contains('overflow-visible')).toBe(true)
     expect(elicitationComposer?.classList.contains('px-px')).toBe(true)
     expect(elicitationComposer?.classList.contains('pb-px')).toBe(true)
-    const resizeHandle = container.querySelector(
+    let resizeHandle = container.querySelector(
       '[aria-label="Resize question panel"]'
     ) as HTMLButtonElement
     expect(resizeHandle).not.toBeNull()
@@ -2914,6 +3015,28 @@ describe('ConversationPanel composer intake', () => {
     expect(scrollSurface.classList.contains('border-border-200')).toBe(true)
     expect(scrollSurface.classList.contains('shadow-sm')).toBe(true)
     expect(scrollSurface.classList.contains('shadow-card-opaque')).toBe(false)
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[aria-label="Collapse question panel"]')!.click()
+    })
+    expect(
+      container.querySelector<HTMLFormElement>('[data-testid="elicitation-choice-mode"]')?.hidden
+    ).toBe(true)
+    expect(container.querySelector('[aria-label="Resize question panel"]')).toBeNull()
+    expectComposerCoveredByBlockingOverlay()
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="reveal-pending-elicitation"]')!
+        .click()
+    })
+    expect(
+      container.querySelector<HTMLFormElement>('[data-testid="elicitation-choice-mode"]')?.hidden
+    ).toBe(false)
+    expect(container.querySelector('[aria-label="Type your own answer"]')).toBe(ownAnswer)
+    expect(document.activeElement).toBe(ownAnswer)
+    expect(ownAnswer.value).toBe('Research draft')
+    resizeHandle = container.querySelector(
+      '[aria-label="Resize question panel"]'
+    ) as HTMLButtonElement
     expectComposerChromeCovered('[aria-label="Open notebook"]')
     expectComposerChromeCovered('[data-testid="background-tasks-chip"]')
 
@@ -2979,6 +3102,10 @@ describe('ConversationPanel composer intake', () => {
     expect((elicitationComposer as HTMLElement).style.height).toBe('398px')
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalInnerHeight })
 
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[aria-label="Collapse question panel"]')!.click()
+    })
+
     renderPanel({
       view: {
         activeSession: {
@@ -3014,6 +3141,9 @@ describe('ConversationPanel composer intake', () => {
     ) as HTMLDivElement
     expect(nextElicitationComposer).not.toBe(elicitationComposer)
     expect(nextElicitationComposer.style.height).toBe('')
+    expect(
+      container.querySelector<HTMLFormElement>('[data-testid="elicitation-choice-mode"]')?.hidden
+    ).toBe(false)
 
     const surfaceFade = container.querySelector('[data-testid="composer-surface-fade"]')
     expect(surfaceFade?.classList.contains('-top-18')).toBe(true)
@@ -3128,6 +3258,7 @@ describe('ConversationPanel composer intake', () => {
     expect(container.querySelector('[data-testid="permission-approval-controls"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="elicitation-composer"]')).toBeNull()
     expectComposerChromeCovered('[aria-label="Open notebook"]')
+    expect(container.querySelector('[data-testid="reveal-pending-elicitation"]')).toBeNull()
     expectComposerChromeCovered('[data-testid="background-tasks-chip"]')
     expectComposerCoveredByBlockingOverlay()
     expect(
@@ -3394,6 +3525,111 @@ describe('ConversationPanel composer intake', () => {
     })
   })
 
+  it('keeps a prepared cold Ask-User answer blocked without showing recovery', async () => {
+    let stored: PersistedChatSession = materializeSessionConversationGraph({
+      id: 'session-cold-choice-flash',
+      projectId: 'project-a',
+      title: 'Cold choice',
+      cwd: '/workspace',
+      status: 'waiting-for-user',
+      runtimeTranscriptOwner: 'main',
+      messages: [
+        {
+          id: 'prompt-cold-choice',
+          role: 'user',
+          content: 'Prepare the report.',
+          status: 'complete',
+          eventIds: [],
+          createdAt: 1,
+          updatedAt: 1
+        }
+      ],
+      activities: [
+        {
+          id: 'tool-cold-choice',
+          kind: 'tool',
+          title: 'Choose an approach',
+          status: 'in_progress',
+          promptMessageId: 'prompt-cold-choice',
+          eventIds: [],
+          sortIndex: 1,
+          createdAt: 2,
+          updatedAt: 2,
+          elicitation: {
+            message: 'Choose an approach',
+            fields: [
+              {
+                id: 'question_0',
+                label: 'Approach',
+                kind: 'single-select',
+                options: [{ value: 'minimal', label: 'Minimal' }]
+              },
+              { id: 'question_0_custom', label: 'Other', kind: 'text' }
+            ],
+            state: 'pending',
+            durable: {
+              kind: 'agent-user-choice',
+              requestId: 'choice-cold',
+              promptMessageId: 'prompt-cold-choice'
+            }
+          }
+        }
+      ],
+      createdAt: 1,
+      updatedAt: 2
+    })
+    useSessionStore.setState({
+      ...createInitialSessionState(),
+      sessions: [hydrateSession(stored)]
+    })
+    useWorkspaceOperationErrors.setState({ errors: {}, diagnostics: {} })
+    const owner = new AcpDurableContinuationContextOwner({
+      loadSessionForContinuation: async () => structuredClone(stored),
+      mutateRuntimeSession: async (_scope, mutate) => {
+        stored = mutate(structuredClone(stored))
+        useSessionStore.getState().applyDurableSessionProjection({
+          source: useSessionStore.getState().sessions[0],
+          session: stored,
+          mode: 'runtime-transcript-authority'
+        })
+        return structuredClone(stored)
+      }
+    })
+    const input = {
+      projectId: stored.projectId,
+      sessionId: stored.id,
+      requestId: 'choice-cold',
+      toolCallId: 'tool-cold-choice',
+      action: 'accept' as const,
+      answers: [{ fieldId: 'question_0', value: 'minimal' }]
+    }
+    const renderCurrent = (): void =>
+      renderPanel({ view: { activeSession: useSessionStore.getState().sessions[0] } })
+    renderCurrent()
+    expect(container.querySelector('[data-testid="elicitation-composer"]')).not.toBeNull()
+    expect(container.textContent).not.toContain('Could not continue the task')
+
+    // Match Main's prepared decision while runtime attachment is still pending.
+    await owner.prepareElicitation(input)
+    renderCurrent()
+    expect(useWorkspaceOperationErrors.getState().errors).toEqual({})
+    expect(container.querySelector('[data-testid="elicitation-recovery"]')).toBeNull()
+    expect(container.textContent).not.toContain('Could not continue the task')
+    expect(container.textContent).not.toContain('End this wait')
+    expect(
+      container.querySelector('[data-testid="ordinary-composer-form"]')?.hasAttribute('inert')
+    ).toBe(true)
+    expect(stored.activities?.[0].elicitation?.answers).toEqual(input.answers)
+
+    // The normal second response retains the exact saved answer for provider delivery.
+    await owner.prepareElicitation({ ...input, continuePrepared: true })
+    renderCurrent()
+    expect(container.querySelector('[data-testid="elicitation-recovery"]')).toBeNull()
+    expect(container.textContent).not.toContain('Could not continue the task')
+    expect(stored.activities?.[0].elicitation?.answers).toEqual(input.answers)
+    expect(stored.activities?.[0].elicitation?.continuationPending).toBe(true)
+  })
+
   it('scopes live Ask-User requests to the active session', () => {
     const fields = [
       {
@@ -3512,6 +3748,168 @@ describe('ConversationPanel composer intake', () => {
     expect(container.textContent).not.toContain('Waiting for a response')
   })
 
+  it('retains the saved-question recovery exit after navigating away during a failed recovery write', async () => {
+    const session: ChatSession = {
+      id: 'saved-question-session',
+      projectId: 'project-a',
+      title: 'Choose',
+      cwd: '/workspace',
+      status: 'waiting-for-user',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+      activities: [
+        {
+          id: 'saved-question',
+          kind: 'tool',
+          title: 'Choose',
+          status: 'completed',
+          sortIndex: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          eventIds: [],
+          elicitation: {
+            message: 'Choose',
+            fields: [],
+            state: 'answered',
+            continuationPending: true,
+            durable: { kind: 'agent-user-choice', requestId: 'saved-choice' }
+          }
+        }
+      ]
+    }
+    const respond = vi.fn().mockResolvedValue(undefined)
+    renderPanel({ view: { activeSession: session }, elicitation: { respond } })
+    expect(
+      container.querySelector('[data-testid="elicitation-continuation-progress"]')
+    ).not.toBeNull()
+    renderPanel({ view: { activeSession: { ...session, id: 'other-session', activities: [] } } })
+    await act(async () =>
+      useWorkspaceElicitationFailures.setState({
+        failures: {
+          [session.id]: { requestId: 'saved-choice', error: 'Recovery persistence failed' }
+        }
+      })
+    )
+    expect(container.textContent).not.toContain('Recovery persistence failed')
+    renderPanel({ view: { activeSession: session }, elicitation: { respond } })
+    expect(container.querySelector('[data-testid="elicitation-recovery"]')).not.toBeNull()
+    expect(container.textContent).toContain('Recovery persistence failed')
+    expect(container.textContent).not.toContain('Retry continuation')
+    expectComposerCoveredByBlockingOverlay()
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'End this wait')!
+        .click()
+    )
+    expect(respond).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'saved-choice', action: 'cancel' })
+    )
+    const nextQuestion = structuredClone(session)
+    nextQuestion.activities![0].elicitation!.durable!.requestId = 'next-choice'
+    renderPanel({ view: { activeSession: nextQuestion }, elicitation: { respond } })
+    expect(
+      container.querySelector('[data-testid="elicitation-continuation-progress"]')
+    ).not.toBeNull()
+    expect(container.textContent).not.toContain('Recovery persistence failed')
+  })
+
+  it.each(['answered', 'declined'] as const)(
+    'offers End this wait when an asynchronous %s continuation cannot persist recovery',
+    async (decision) => {
+      const persisted = materializeSessionConversationGraph({
+        id: 'async-continuation-failure',
+        projectId: 'project-a',
+        title: 'Choose',
+        cwd: '/workspace',
+        status: 'waiting-for-user',
+        runtimeTranscriptOwner: 'main',
+        messages: [
+          {
+            id: 'choice-prompt',
+            role: 'user',
+            content: 'Prepare the report.',
+            status: 'complete',
+            eventIds: [],
+            createdAt: 1,
+            updatedAt: 1
+          }
+        ],
+        activities: [
+          {
+            id: 'choice-question',
+            kind: 'tool',
+            title: 'Choose',
+            status: 'completed',
+            promptMessageId: 'choice-prompt',
+            sortIndex: 2,
+            createdAt: 2,
+            updatedAt: 3,
+            eventIds: [],
+            elicitation: {
+              message: 'Choose',
+              fields: [],
+              state: decision,
+              respondedAt: 3,
+              continuationPending: true,
+              durable: {
+                kind: 'agent-user-choice',
+                requestId: 'saved-choice',
+                promptMessageId: 'choice-prompt'
+              }
+            }
+          }
+        ],
+        createdAt: 1,
+        updatedAt: 3
+      })
+      const activeSession = hydrateSession(persisted)
+      const respond = vi.fn().mockResolvedValue(undefined)
+      useSessionStore.setState({ ...createInitialSessionState(), sessions: [activeSession] })
+      renderPanel({ view: { activeSession }, elicitation: { requests: [], respond } })
+      expect(
+        container.querySelector('[data-testid="elicitation-continuation-progress"]')
+      ).not.toBeNull()
+
+      await act(async () =>
+        applyWorkspaceRuntimeEvent({
+          id: 'async-continuation-failed',
+          timestamp: 4,
+          kind: 'error',
+          level: 'error',
+          sessionId: activeSession.id,
+          promptMessageId: 'choice-prompt',
+          title: 'Could not continue the Agent task',
+          text: 'Runtime terminal recovery timed out.'
+        })
+      )
+      renderPanel({
+        view: {
+          activeSession,
+          actionError: useWorkspaceOperationErrors.getState().errors[activeSession.id]
+        },
+        elicitation: { requests: [], respond }
+      })
+
+      expect(useSessionStore.getState().sessions[0]).toBe(activeSession)
+      expect(
+        container.querySelector('[data-testid="elicitation-continuation-progress"]')
+      ).toBeNull()
+      expect(container.querySelector('[data-testid="elicitation-recovery"]')).not.toBeNull()
+      expect(container.textContent).toContain('Runtime terminal recovery timed out.')
+      expect(container.textContent).not.toContain('Retry continuation')
+      expectComposerCoveredByBlockingOverlay()
+      await act(async () =>
+        [...container.querySelectorAll('button')]
+          .find((button) => button.textContent === 'End this wait')!
+          .click()
+      )
+      expect(respond).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: 'saved-choice', action: 'cancel' })
+      )
+    }
+  )
+
   it.each(
     (['before-rearm', 'after-rearm'] as const).flatMap((order) => [
       ...[false, true].flatMap((previousFailure) =>
@@ -3611,7 +4009,11 @@ describe('ConversationPanel composer intake', () => {
       useSessionStore.setState({ ...createInitialSessionState(), sessions: [projected] })
       useWorkspaceOperationErrors.setState({ errors: {}, diagnostics: {} })
       renderPanel({ view: { activeSession: projected }, elicitation: { requests: [] } })
-      expect(container.querySelector('[data-testid="elicitation-composer"]')).toBeNull()
+      expect(
+        container.querySelector('[data-testid="elicitation-continuation-progress"]')
+      ).not.toBeNull()
+      expect(container.querySelector('[data-testid="elicitation-recovery"]')).toBeNull()
+      expectComposerCoveredByBlockingOverlay()
       const receiveError = async (): Promise<void> => {
         await applyWorkspaceRuntimeEvent({
           id: 'continuation-failed',
@@ -4380,6 +4782,14 @@ describe('ConversationPanel composer intake', () => {
       (container.querySelector('[data-testid="menu-branch-in-new-session"]') as HTMLButtonElement)
         .disabled
     ).toBe(false)
+  })
+
+  it('keeps an unavailable model in the picker without a duplicate configuration notice', () => {
+    renderPanel({ agentControls: { modelUnavailable: true } })
+
+    expect(container.querySelector('[data-testid="mock-model-picker"]')).not.toBeNull()
+    expect(container.textContent).not.toContain('Model configuration needs attention')
+    expect(container.querySelector('[data-notice-action="open-provider-settings"]')).toBeNull()
   })
 
   it('threads replay-independent agent controls separately from provider controls', () => {
@@ -9356,6 +9766,39 @@ describe('ConversationPanel unified failure notices', () => {
     expect(action('report')).not.toBeNull()
   })
 
+  it('opens Model settings from a localized image annotation failure without clearing the draft', async () => {
+    const { i18next } = await import('../../i18n')
+    try {
+      await act(async () => i18next.changeLanguage('zh-Hans'))
+      const error = i18next.t(
+        "The selected model doesn't support images. Configure a Vision model in Settings > Model to enable image support."
+      )
+      const openSettingsToPanel = vi.fn()
+      useSettingsStore.setState({ openSettingsToPanel })
+      renderPanel({
+        view: { actionError: error },
+        composer: {
+          view: {
+            error,
+            errorFailure: {
+              category: 'configuration',
+              reason: 'configuration/vision-model',
+              diagnostics: {}
+            },
+            doc: docFromText('Keep my annotation draft')
+          }
+        }
+      })
+      const settings = action('open-provider-settings')
+      expect(settings?.textContent).toContain(i18next.t('Model settings'))
+      act(() => settings!.click())
+      expect(openSettingsToPanel).toHaveBeenCalledWith('model')
+      expect(getComposerEditor().textContent).toBe('Keep my annotation draft')
+    } finally {
+      await act(async () => i18next.changeLanguage('en'))
+    }
+  })
+
   it.each([
     ['configuration/vision-model', 'open-provider-settings', 'model'],
     ['configuration/codex-cli', 'open-agent-settings', 'agent'],
@@ -9656,7 +10099,10 @@ it('shows the branch source chat number and opens that source session', () => {
 
 it.each(['question', 'delegated question', 'plan', 'permission', 'delegated permission'] as const)(
   'does not reactivate an imported historical %s',
-  (kind) => {
+  async (kind) => {
+    window.api.researchVideo = {
+      status: vi.fn().mockResolvedValue({})
+    } as unknown as typeof window.api.researchVideo
     const activeSession: ChatSession = {
       ...delegatedQuestionSession(),
       packageOrigin: {
@@ -9712,6 +10158,9 @@ it.each(['question', 'delegated question', 'plan', 'permission', 'delegated perm
           : []
       }
     })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
     expect(container.querySelector('[data-testid="permission-approval-controls"]')).toBeNull()
     const importedHistory = container.querySelector('[aria-label="Imported research history"]')
     expect(importedHistory).not.toBeNull()
@@ -9723,6 +10172,9 @@ it.each(['question', 'delegated question', 'plan', 'permission', 'delegated perm
     expect(importedHistory?.textContent).not.toContain('Package source')
     expect(importedHistory?.textContent).not.toContain('Imported on')
     expect(importedHistory?.textContent).toContain('View replay')
+    expect(importedHistory?.textContent).toContain('Generate research film')
+    expect(getConversationHeader().textContent).not.toContain('Generate research film')
+    expect(getConversationHeader().querySelector('[aria-label="Play research film"]')).toBeNull()
     expect(importedHistory?.textContent).toContain('Fork to continue')
     expect(container.querySelector('[data-testid="blocking-composer-overlay"]')).toBeNull()
     expect(container.textContent).not.toContain('Asked by Researcher')
@@ -9732,6 +10184,255 @@ it.each(['question', 'delegated question', 'plan', 'permission', 'delegated perm
     ).toBe(true)
   }
 )
+
+describe('prompt optimization admission', () => {
+  it('passes the fixed prompt optimization provider, model, and reasoning effort to IPC', async () => {
+    const optimizePrompt = vi.fn(async () => ({ text: 'Improved' }))
+    window.api.projects = {
+      optimizePrompt,
+      recordOptimizationEvent: vi.fn(async () => {})
+    } as unknown as typeof window.api.projects
+    useSettingsStore.setState({
+      promptOptimizationModel: {
+        mode: 'fixed',
+        providerId: 'prompt-provider',
+        model: 'prompt-model',
+        reasoningEffort: 'xhigh'
+      }
+    })
+    renderPanel({
+      view: {
+        activeSession: {
+          id: 'optimization-model-session',
+          projectId: 'project',
+          title: 'Session',
+          cwd: '/workspace',
+          status: 'idle',
+          messages: [],
+          createdAt: 1,
+          updatedAt: 1
+        }
+      },
+      composer: { view: { doc: docFromText('Original') } },
+      conversation: { availability: { submit: true } }
+    })
+
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Optimize question"]')!.click()
+    )
+
+    expect(optimizePrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: 'project',
+        input: 'Original',
+        agentConfiguration: {
+          providerId: 'prompt-provider',
+          model: 'prompt-model',
+          reasoningEffort: 'xhigh'
+        }
+      })
+    )
+  })
+
+  it.each([false, true])(
+    'routes optimization failures without a send retry or stale diagnostics when oversized=%s',
+    async (oversized) => {
+      let reject!: (error: Error) => void
+      window.api.projects = {
+        optimizePrompt: vi.fn(
+          () =>
+            new Promise((_resolve, fail) => {
+              reject = fail
+            })
+        ),
+        recordOptimizationEvent: vi.fn(async () => {})
+      } as unknown as typeof window.api.projects
+      const submit = vi.fn()
+      const render = (text: string): void =>
+        renderPanel({
+          view: {
+            activeSession: {
+              id: 'optimization-session',
+              projectId: 'project',
+              title: 'Session',
+              cwd: '/workspace',
+              status: 'idle',
+              messages: [],
+              createdAt: 1,
+              updatedAt: 1
+            }
+          },
+          composer: { view: { doc: docFromText(text) } },
+          agentControls: {
+            modelConfiguration: {
+              providerId: 'session',
+              model: 'session-model',
+              reasoningEffort: 'high'
+            }
+          },
+          conversation: { availability: { submit: true }, actions: { submit: { draft: submit } } }
+        })
+      render('Original')
+      act(() =>
+        container
+          .querySelector<HTMLButtonElement>('button[aria-label="Optimize question"]')!
+          .click()
+      )
+      if (oversized) render('x'.repeat(16001))
+      await act(async () => reject(new Error('Optimization unavailable')))
+      const notices = container.querySelectorAll('[data-testid="composer-notice-slot"]')
+      expect(notices).toHaveLength(1)
+      const description = oversized
+        ? 'Shorten your question to optimize it (maximum 16,000 characters).'
+        : 'Could not optimize your question. Your draft was kept. Please try again.'
+      expect(notices[0].textContent).toContain(description)
+      const details = notices[0].querySelector('pre')!.textContent!
+      expect(details.split(description)).toHaveLength(2)
+      if (oversized) expect(details).not.toContain('requestId:')
+      else expect(details).toMatch(/requestId: [\da-f-]{36}/)
+      expect(details).not.toContain('Optimization unavailable')
+      expect(notices[0].querySelector('[data-notice-action="retry"]')).toBeNull()
+      expect(submit).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(['select', 'paste', 'drop'] as const)(
+    'resets optimization when files are added by %s, including while a request is pending',
+    async (method) => {
+      let finish!: (result: { text: string }) => void
+      window.api.projects = {
+        optimizePrompt: vi.fn(
+          () =>
+            new Promise<{ text: string }>((resolve) => {
+              finish = resolve
+            })
+        ),
+        recordOptimizationEvent: vi.fn(async () => {})
+      } as unknown as typeof window.api.projects
+      let doc = docFromText('Original')
+      const render = (): void =>
+        renderPanel({
+          view: {
+            activeSession: {
+              id: 'attachment-session',
+              projectId: 'project',
+              title: 'Session',
+              cwd: '/workspace',
+              status: 'idle',
+              messages: [],
+              createdAt: 1,
+              updatedAt: 1
+            }
+          },
+          composer: {
+            view: { doc },
+            actions: {
+              changeDoc: (next) => {
+                doc = next
+                render()
+              }
+            }
+          },
+          agentControls: {
+            modelConfiguration: { providerId: 'session', model: 'model', reasoningEffort: 'high' }
+          }
+        })
+      const button = (label: string): HTMLButtonElement | null =>
+        container.querySelector(`button[aria-label="${label}"]`)
+      const attach = (): void => {
+        const files = [new File(['data'], 'data.csv', { type: 'text/csv' })]
+        if (method === 'paste') dispatchPaste(files)
+        else if (method === 'drop') dispatchDrag('drop', ['Files'], files)
+        else {
+          const input = container.querySelector<HTMLInputElement>('input[type="file"]')!
+          Object.defineProperty(input, 'files', { configurable: true, value: files })
+          act(() => {
+            input.dispatchEvent(new Event('change', { bubbles: true }))
+          })
+        }
+      }
+      render()
+      act(() => button('Optimize question')!.click())
+      await act(async () => finish({ text: 'Improved' }))
+      expect(button('Undo optimization')).not.toBeNull()
+      attach()
+      expect(button('Undo optimization')).toBeNull()
+      expect(button('Optimize question')).not.toBeNull()
+      expect(doc).toEqual(docFromText('Improved'))
+      act(() => button('Optimize question')!.click())
+      attach()
+      await act(async () => finish({ text: 'Obsolete result' }))
+      expect(doc).toEqual(docFromText('Improved'))
+      expect(button('Undo optimization')).toBeNull()
+      expect(button('Optimize question')).not.toBeNull()
+    }
+  )
+
+  it('keeps undo after a rejected send and clears it only after acceptance', async () => {
+    const recordOptimizationEvent = vi.fn(async () => {})
+    window.api.projects = {
+      optimizePrompt: vi.fn(async () => ({ text: 'Improved' })),
+      recordOptimizationEvent
+    } as unknown as typeof window.api.projects
+    let doc = docFromText('Original')
+    let sessionId = 'pending-session'
+    const submit = vi.fn<PanelProps['conversation']['actions']['submit']['draft']>()
+    const render = (): void =>
+      renderPanel({
+        view: {
+          activeSession: {
+            id: sessionId,
+            projectId: 'project',
+            title: 'Session',
+            cwd: '/workspace',
+            status: 'idle',
+            messages: [],
+            createdAt: 1,
+            updatedAt: 1
+          }
+        },
+        composer: {
+          view: { doc },
+          actions: {
+            changeDoc: (next) => {
+              doc = next
+              render()
+            }
+          }
+        },
+        agentControls: {
+          modelConfiguration: {
+            providerId: 'session',
+            model: 'session-model',
+            reasoningEffort: 'high'
+          }
+        },
+        conversation: { availability: { submit: true }, actions: { submit: { draft: submit } } }
+      })
+    const button = (label: string): HTMLButtonElement | undefined =>
+      container.querySelector<HTMLButtonElement>(
+        `button[aria-label="${label}"]:not([aria-hidden="true"])`
+      ) ??
+      Array.from(container.querySelectorAll('button')).find((node) => node.textContent === label)
+    render()
+    await act(async () => button('Optimize question')!.click())
+    expect(doc).toEqual(docFromText('Improved'))
+    act(() => button('Send message')!.click())
+    expect(submit).toHaveBeenCalledOnce()
+    // WorkspacePage preserves this panel instance when its pending Session binds.
+    sessionId = 'bound-session'
+    render()
+    expect(button('Undo optimization')).toBeDefined()
+    expect(recordOptimizationEvent).not.toHaveBeenCalledWith({ action: 'send' })
+    act(() => button('Undo optimization')!.click())
+    expect(doc).toEqual(docFromText('Original'))
+    await act(async () => button('Optimize question')!.click())
+    act(() => button('Send message')!.click())
+    act(() => submit.mock.calls.at(-1)![0].onAccepted?.())
+    expect(button('Undo optimization')).toBeUndefined()
+    expect(recordOptimizationEvent).toHaveBeenCalledWith({ action: 'send' })
+  })
+})
 
 const selectAdditionalNotice = (index = 0): void => {
   const slot = container.querySelector('[data-testid="composer-notice-slot"]')

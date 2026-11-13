@@ -166,6 +166,8 @@ export async function composeAgentRuntime({
       canOwnRuntimeBindingDecision: (request) =>
         notebookService.canOwnRuntimeBindingDecision(request),
       peekNotebookHandoffContext: (sessionId) => notebookService.peekHandoffContext(sessionId),
+      isReplNamespaceUnavailable: (projectId, sessionId, rootFrameId) =>
+        notebookService.isReplNamespaceUnavailable(projectId, sessionId, rootFrameId),
       authorizeSkillImportReferencedUploads: (projectId, sessionId, paths) =>
         conversationSkillImporter.authorizeReferencedUploads(projectId, sessionId, paths),
       settingsService,
@@ -173,8 +175,14 @@ export async function composeAgentRuntime({
       permissionGrantRegistry,
       taskNotifications,
       notificationInbox,
-      onSessionTurnStarted: approvalSessionLifecycle.onSessionTurnStarted,
-      onSessionTurnEnded: approvalSessionLifecycle.onSessionTurnEnded,
+      onSessionTurnStarted: (sessionId, turnToken) => {
+        notebookService.noteSessionActivity(sessionId)
+        approvalSessionLifecycle.onSessionTurnStarted?.(sessionId, turnToken)
+      },
+      onSessionTurnEnded: (sessionId, turnToken) => {
+        notebookService.noteSessionActivity(sessionId)
+        approvalSessionLifecycle.onSessionTurnEnded?.(sessionId, turnToken)
+      },
       onSkillImportAttachmentEligible: approvalSessionLifecycle.onSkillImportAttachmentEligible,
       onTrustedMessageAttribution: (projectId, event) =>
         messageAttributionAuthority.recordRuntimeEvent(projectId, event),

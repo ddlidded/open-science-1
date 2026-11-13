@@ -159,34 +159,37 @@ describe('Auto operation completeness against real tool registrations', () => {
     }
     expect({ definitions, notebookSchemas, sharedContracts }).toEqual({
       definitions: {
-        // Reviewed: 401 publication errors now explain recovery without dropping provenance.
-        // Strict inputs, allow-once disposition and owner-checked source access are unchanged.
+        // Reviewed: errors name a code and next step, and legacy top-level content/encoding is
+        // rejected in favor of source. Allow-once disposition and owner-checked source access are unchanged.
         'artifacts/mcp-server.ts':
-          'f44800f59957041e1004ce93a039e47a3c491f958fe429ef5b3fa49ae472b2f0',
+          '9e0e7684e9ce91f56ba4e6bfc49bcd2a1bb97bf6dd2a22bd686307c9d634dde2',
+        // Reviewed: save_to_inbox/acquire_pdf advertise candidates as objects; the same strict
+        // candidate schema now validates inline records in the handler before any save or download.
+        // Citation tool descriptions are shortened only. Trusted origin, permission inputs and
+        // allow-once disposition are unchanged.
         'literature/library-mcp-server.ts':
-          'f6eddd996e4651c56586435e7c0845a437dd7d3b8c18dfe0ff634eb0e8bbefd6',
-        // Reviewed: linked-PDF reading order is resolved automatically from logical structure
-        // or layout, with OCR guidance and coverage presentation. Strict inputs, mounted-server checks and
-        // single-use authorization are unchanged.
+          '400ea9fb1739b849dad3f55d453b02be9879bda3e86fde29ebb34084d3e7e33e',
+        // Reviewed: errors keep specific codes with a next step and annotation cursors are opaque
+        // strings. Strict inputs, mounted-server checks and single-use authorization are unchanged.
         'literature/mcp-server.ts':
-          '01d43ef955ccb78cb4f5a0d1a5899b972221752055a822e18b2004d6cd1e74d9',
-        // Reviewed: Windows Bioconductor installer guidance, plus non-blank patterns on required
-        // ask_user_question strings that only narrow accepted inputs; handlers and Auto operation
-        // dispositions are unchanged.
+          '561a62c02556d3677874d524dd7c9433b3131a42eda21f526d8684888a673cd9',
+        // Reviewed: interpreter descriptions now explain idle reclamation and volatile variables.
+        // Tool schemas, handlers, operation classifiers and Auto dispositions are unchanged.
         'notebook/mcp-server.ts':
-          '1bf1a40a68e0bf5fe1fbc8eaf5e06891a0caaf7f710a89e801f8b9df1c2ee63a',
-        // Reviewed: generate_plan sends progress notifications while awaiting review; the handler
-        // call, its result and the Plan operation dispositions are unchanged.
+          '40c4edee0775cde34095c02aee02764a465792fb657ed62a40b64dcf666b1718',
+        // Reviewed: invalid-plan errors carry repair guidance; the handler call, its result and the
+        // Plan operation dispositions are unchanged.
         'session-plan/plan-mcp-server.ts':
-          'fd75f9cb577deef4abb70925b4d059497dca57a6a7d42d2d9826fb8bcdfd4d02',
-        'skills/mcp-server.ts': '3064af8275f8026e9dbf84b445f3a5061d41619c523def579c4b759c0aac338b'
+          '1451e969ed1af4ddea333c4005f11713d39f8590083099c0ce3c73b47937d326',
+        // Reviewed: import errors carry codes and next steps; the schema and preview handoff are unchanged.
+        'skills/mcp-server.ts': '75e23698e0b11be9919ae224e1516ba82241aa703a20ae29c50448c35ce1d8da'
       },
       notebookSchemas: {
         // Reviewed: required question and option label strings must contain non-whitespace.
         ask_user_question: 'eaf58cc178cc28d01fd208393f67dc394f374b4dd80f822158942db8a3c48afb',
         background_run: '4198921bb3f61261431524f7e57c92d8713bfe5db49c360a30b66b3cc4e027fd',
         manage_environments: '15d33c6e75c14aaddad62bc062f714238ae7c87ab08976d77efd1f77e8641675',
-        request_network_access: '6b5a49d73cc704691da193510764101bc5577b48bb7c0fa8bf99f1b29b500f95'
+        request_network_access: '019beadbad4627d5ad4dc2c1bfbf5cc3f777ecf5382df20291952cadbba3eeaf'
       },
       sharedContracts: {
         activityDeclaration: '1739b6cfadd2912aa53f4d11bf69d908da37d5f822476a998b928e9de7ddffdc',

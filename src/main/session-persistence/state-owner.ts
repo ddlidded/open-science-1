@@ -20,6 +20,7 @@ import {
   sanitizePlanHistoryProjections,
   sanitizeSessionRuntimeContext,
   SessionConfigurationBusyError,
+  SessionRevisionConflictError,
   sessionRevision,
   type DelegationPolicy,
   type PersistedChatMessage,
@@ -108,7 +109,8 @@ type SessionStateRepository = {
   retainRuntimeSessionState?(projectId: string, sessionId: string, retained: boolean): void
   saveSession(
     session: PersistedChatSession,
-    expectedRevision?: number
+    expectedRevision?: number,
+    onJsonCommitted?: (session: PersistedChatSession) => void
   ): Promise<PersistedChatSession>
 }
 
@@ -560,6 +562,23 @@ class SessionPersistenceStateOwner {
     candidate.revision = current.revision + 1
     const runtimeContext = sanitizeSessionRuntimeContext(candidate)
     if (!runtimeContext) throw new Error('Session runtime context patch is not JSON-safe.')
+    if (
+      session.deletedDiscussionSourceId &&
+      runtimeContext.sessionContext?.bindings.some(
+        (binding) =>
+          binding.projectId === projectId && binding.sessionId === session.deletedDiscussionSourceId
+      )
+    )
+      throw new Error('The discussion source was permanently deleted.')
+    if (session.parentSessionId && Object.hasOwn(patch, 'sessionContext')) {
+      const bindings = runtimeContext.sessionContext?.bindings
+      if (
+        bindings?.length !== 1 ||
+        bindings[0].sessionId !== session.parentSessionId ||
+        bindings[0].projectId !== projectId
+      )
+        throw new Error('A child discussion must keep its parent research Session.')
+    }
 
     const archivePlanProjection = command.archivePlanProjection
       ? sanitizePlanHistoryProjections([command.archivePlanProjection])?.[0]
@@ -910,7 +929,8 @@ class SessionPersistenceStateOwner {
 
   async mutateRuntimeSession(
     scope: { projectId: string; sessionId: string },
-    mutate: (session: PersistedChatSession) => PersistedChatSession
+    mutate: (session: PersistedChatSession) => PersistedChatSession,
+    onJsonCommitted?: () => void
   ): Promise<PersistedChatSession> {
     this.options.assertMutable(scope.projectId, scope.sessionId, 'mutate')
     const loaded = await loadAuthority(this.options.repository, scope.projectId, scope.sessionId)
@@ -956,19 +976,27 @@ class SessionPersistenceStateOwner {
     )
     if (validation.status === 'conflict') throw validation.error
     let persisted: PersistedChatSession
+    let recorded = false
+    const recordJsonCommit = (session: PersistedChatSession): void => {
+      this.recordSession(session)
+      this.invalidateBindingTopology(scope.projectId, scope.sessionId)
+      recorded = true
+      onJsonCommitted?.()
+    }
     try {
-      persisted = await saveSessionWithRevision(
-        this.options.repository,
-        candidate,
-        previous.revision ?? 0
-      )
+      persisted = onJsonCommitted
+        ? await this.options.repository.saveSession(
+            candidate,
+            previous.revision ?? 0,
+            recordJsonCommit
+          )
+        : await saveSessionWithRevision(this.options.repository, candidate, previous.revision ?? 0)
     } catch (error) {
       if (!(error instanceof SessionProjectionAfterCommitError)) throw error
       persisted = error.committedSession
       this.markMetadataIncomplete()
     }
-    this.recordSession(persisted)
-    this.invalidateBindingTopology(scope.projectId, scope.sessionId)
+    if (!recorded) recordJsonCommit(persisted)
     // JSON is the authoritative commit. Derived capture/index/publication failure must not report
     // that this mutation never happened or invite another execution of the provider work.
     try {
@@ -1466,6 +1494,12 @@ class SessionPersistenceStateOwner {
       )
     }
     const authority = authoritative.status === 'found' ? authoritative.session : undefined
+    const assertRecoveryRevision = (current: PersistedChatSession | undefined): void => {
+      const actualRevision = current ? sessionRevision(current) : 0
+      if (options.expectedRevision !== undefined && options.expectedRevision !== actualRevision)
+        throw new SessionRevisionConflictError(options.expectedRevision, actualRevision)
+    }
+    assertRecoveryRevision(authority)
     if (
       !authority &&
       options.conversationCommands?.some(
@@ -1517,7 +1551,10 @@ class SessionPersistenceStateOwner {
           // The next terminal save retries the command against an authority with no active run.
           // Real branch identity conflicts still reject.
           if (error instanceof SessionConversationCommandDeferredError)
-            return this.mutateRuntimeSession({ projectId, sessionId }, () => candidate)
+            return this.mutateRuntimeSession({ projectId, sessionId }, (current) => {
+              assertRecoveryRevision(current)
+              return candidate
+            })
           throw error
         }
         if (this.options.uploads)
@@ -1525,7 +1562,10 @@ class SessionPersistenceStateOwner {
             mode: 'live-save'
           })
       }
-      return this.mutateRuntimeSession({ projectId, sessionId }, () => candidate)
+      return this.mutateRuntimeSession({ projectId, sessionId }, (current) => {
+        assertRecoveryRevision(current)
+        return candidate
+      })
     }
     session = {
       ...session,
@@ -1626,6 +1666,7 @@ class SessionPersistenceStateOwner {
         : undefined
     const commandProjection = conversationAuthority
       ? {
+          parentSessionId: conversationAuthority.parentSessionId,
           conversationGraph: conversationAuthority.conversationGraph,
           messages: conversationAuthority.messages,
           activities: conversationAuthority.activities,
@@ -1646,6 +1687,13 @@ class SessionPersistenceStateOwner {
       ...commandProjection,
       ...relayProjection,
       ...mainOwnedSessionDetails,
+      ...(authority?.parentSessionId ? { parentSessionId: authority.parentSessionId } : {}),
+      ...(authority?.deletedDiscussionSourceId
+        ? {
+            parentSessionId: undefined,
+            deletedDiscussionSourceId: authority.deletedDiscussionSourceId
+          }
+        : { deletedDiscussionSourceId: undefined }),
       ...(authority?.runtimeContext ? { runtimeContext: authority.runtimeContext } : {}),
       ...(authority?.archivedAt ? { archivedAt: authority.archivedAt } : {}),
       ...(authority?.planHistoryProjections

@@ -267,6 +267,7 @@ class HeadlessTaskApi {
       opencode: preflight.opencodeReady,
       codex: preflight.codexReady,
       codebuddy: preflight.codebuddyReady,
+      'open-science-agent': preflight.openScienceAgentReady === true,
       pi: preflight.piReady === true,
       devin: preflight.devinReady === true
     } as const
@@ -290,6 +291,11 @@ class HeadlessTaskApi {
         configured: Boolean(settings.codebuddy.resolvedPath),
         version: settings.codebuddy.version,
         managed: settings.codebuddyManaged
+      },
+      'open-science-agent': {
+        configured: preflight.openScienceAgentReady === true,
+        version: '0.1.0',
+        managed: true
       },
       pi: {
         configured: preflight.piReady === true,

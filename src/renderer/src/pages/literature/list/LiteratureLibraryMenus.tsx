@@ -18,6 +18,7 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LiteratureHoverDropdown } from '../LiteratureHoverMenus'
+import type { ReferenceExportRequest } from '@aipoch/literature-library/client'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -61,13 +62,15 @@ export function LiteratureAddMenu({
       <DropdownMenuContent align="end" className="w-72">
         <DropdownMenuItem
           className="gap-2.5"
-          aria-label={t('Add from DOI or link')}
+          aria-label={t('Add from identifiers or links')}
           onSelect={() => onAddLink(linkTrigger.current)}
         >
           <Link className="size-4 shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex flex-col">
-            <span>{t('Add from DOI or link')}</span>
-            <span className="text-xs text-muted-foreground">{t('DOI and arXiv links')}</span>
+            <span>{t('Add from identifiers or links')}</span>
+            <span className="text-xs text-muted-foreground">
+              {t('DOI, arXiv, PMID, PMCID or links')}
+            </span>
           </span>
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -126,7 +129,7 @@ export function LiteratureExportMenu({
   onExport
 }: Readonly<{
   disabled?: boolean
-  onExport: (format: 'bibtex' | 'ris') => Promise<boolean>
+  onExport: (format: ReferenceExportRequest['format']) => Promise<boolean>
 }>): React.JSX.Element {
   const { t } = useTranslation()
   const [status, setStatus] = useState<'error' | 'idle' | 'loading' | 'success'>('idle')
@@ -139,7 +142,7 @@ export function LiteratureExportMenu({
     []
   )
 
-  const runExport = async (format: 'bibtex' | 'ris'): Promise<void> => {
+  const runExport = async (format: ReferenceExportRequest['format']): Promise<void> => {
     if (status === 'loading') return
     if (resetTimeoutRef.current !== undefined) window.clearTimeout(resetTimeoutRef.current)
     setStatus('loading')
@@ -190,6 +193,10 @@ export function LiteratureExportMenu({
         <FileText className="mr-2 size-4" aria-hidden="true" />
         {t('RIS')}
       </DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => void runExport('csv')}>
+        <FileText className="mr-2 size-4" aria-hidden="true" />
+        {t('CSV')}
+      </DropdownMenuItem>
     </LiteratureHoverDropdown>
   )
 }
@@ -234,7 +241,7 @@ export function LiteratureLibraryActionsMenu({
   onDelete?: () => void
   identityKey: string
   exportDisabled?: boolean
-  onExport: (format: 'bibtex' | 'ris') => Promise<boolean>
+  onExport: (format: ReferenceExportRequest['format']) => Promise<boolean>
 }>): React.JSX.Element {
   const { t } = useTranslation()
   const [status, setStatus] = useState<'error' | 'idle' | 'loading' | 'success'>('idle')
@@ -247,7 +254,7 @@ export function LiteratureLibraryActionsMenu({
     []
   )
 
-  const runExport = async (format: 'bibtex' | 'ris'): Promise<void> => {
+  const runExport = async (format: ReferenceExportRequest['format']): Promise<void> => {
     if (status === 'loading') return
     if (resetTimeoutRef.current !== undefined) window.clearTimeout(resetTimeoutRef.current)
     setStatus('loading')
@@ -273,11 +280,17 @@ export function LiteratureLibraryActionsMenu({
           edit: { labelKey: 'Edit collection', icon: Pencil },
           remove: { labelKey: 'Delete collection', icon: Trash2, danger: true },
           bibtex: { labelKey: 'BibTeX', icon: FileText },
-          ris: { labelKey: 'RIS', icon: FileText }
+          ris: { labelKey: 'RIS', icon: FileText },
+          csv: { labelKey: 'CSV', icon: FileText }
         }}
         recipe={[
           { kind: 'action', action: 'edit' },
-          { kind: 'submenu', labelKey: 'Export', icon: Download, actions: ['bibtex', 'ris'] },
+          {
+            kind: 'submenu',
+            labelKey: 'Export',
+            icon: Download,
+            actions: ['bibtex', 'ris', 'csv']
+          },
           { kind: 'separator' },
           { kind: 'action', action: 'remove' }
         ]}
@@ -285,7 +298,8 @@ export function LiteratureLibraryActionsMenu({
           edit: { execute: () => onEdit?.(), hidden: !onEdit },
           remove: { execute: () => onDelete?.(), hidden: !onDelete },
           bibtex: { execute: () => runExport('bibtex'), disabled: exportDisabled },
-          ris: { execute: () => runExport('ris'), disabled: exportDisabled }
+          ris: { execute: () => runExport('ris'), disabled: exportDisabled },
+          csv: { execute: () => runExport('csv'), disabled: exportDisabled }
         }}
       >
         <div>

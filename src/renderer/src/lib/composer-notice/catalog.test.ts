@@ -4,7 +4,12 @@ import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { runtimeModuleSpecifiers } from '../../../../../test/module-boundary-assertions'
 import type { FailureCategory, FailureReason } from '../../../../shared/failure/contract'
-import { noticeCatalog, noticePresentation, reasonCatalog } from './catalog'
+import {
+  formatNoticeDiagnostics,
+  noticeCatalog,
+  noticePresentation,
+  reasonCatalog
+} from './catalog'
 
 const root = resolve(__dirname, '../../../../..')
 const sources = (directory: string): string[] =>
@@ -36,6 +41,25 @@ for (const statement of contract.statements) {
         categories.push(member.literal.text)
   }
 }
+
+it('does not repeat the displayed description when an operation uses it as its raw diagnostic', () => {
+  const description = 'Could not optimize your question. Your draft was kept. Please try again.'
+  expect(
+    formatNoticeDiagnostics(
+      {
+        id: 'optimization',
+        source: 'operation',
+        occurredAt: 0,
+        failure: {
+          category: 'service',
+          diagnostics: { raw: description, requestId: 'request-id' }
+        }
+      },
+      'Optimize question',
+      description
+    )
+  ).toBe(`Optimize question\n${description}\nrequestId: request-id`)
+})
 
 describe('composer notice boundaries', () => {
   it('has one classifier importing recognizers; projections and renderer consume its public contract', () => {
@@ -141,4 +165,15 @@ describe('composer notice boundaries', () => {
       noticePresentation({ category: 'service', reason: 'service/future-reason', diagnostics: {} })
     ).toBe(noticeCatalog.service)
   })
+})
+
+it('offers diagnostics and a fresh conversation for unknown effects, never a blind retry', () => {
+  const presentation = noticePresentation({
+    category: 'session',
+    reason: 'session/tool-outcome-unknown',
+    diagnostics: {}
+  })
+  expect(presentation.primaryAction).toBe('export-diagnostics')
+  expect(presentation.secondaryActions).toEqual(['new-session'])
+  expect(presentation.descriptionKey).toContain('verified state')
 })

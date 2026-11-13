@@ -1,3 +1,5 @@
+import { readSourceLinkImage, readSourceLinkMetadata } from './source-link-metadata'
+import type { SourceLinkMetadata } from '../../shared/source-preview'
 import type {
   SavedSkillSource,
   AddSkillSourceRequest,
@@ -31,6 +33,7 @@ import type {
   SetNetworkProxyRequest,
   SetNotebookNetworkRequest,
   SetProjectFilesFilterRequest,
+  SetPromptOptimizationModelRequest,
   SetReviewerModelRequest,
   SetSessionDetailsModelRequest,
   SetSubagentModelRequest,
@@ -99,6 +102,7 @@ type CoreSettingsCommandStore = Pick<
   | 'getConnectorDetail'
   | 'getPackageMirror'
   | 'reviewNotebookPrivateDestination'
+  | 'getNotebookNetwork'
   | 'getNotebookNetworkStatus'
   | 'getLocalShellRuntimePreference'
   | 'getWsl2BashPreviewStatus'
@@ -153,6 +157,7 @@ type CoreSettingsCommandStore = Pick<
   | 'setNotebookNetwork'
   | 'setProjectFilesFilter'
   | 'setReviewerModel'
+  | 'setPromptOptimizationModel'
   | 'selectWslProfile'
   | 'setSessionDetailsModel'
   | 'setSubagentModel'
@@ -279,6 +284,16 @@ const settingsCoreApplicationCommands = Object.freeze({
     readonly [request: PrivateDestinationRequest],
     StoreResult<'reviewNotebookPrivateDestination'>
   >('settings:review-notebook-private-destination'),
+  getSourceLinkMetadata: defineApplicationCommand<
+    'settings:get-source-link-metadata',
+    readonly [url: string],
+    SourceLinkMetadata
+  >('settings:get-source-link-metadata'),
+  getSourceLinkImage: defineApplicationCommand<
+    'settings:get-source-link-image',
+    readonly [url: string],
+    string | undefined
+  >('settings:get-source-link-image'),
   getNotebookNetworkStatus: defineApplicationCommand<
     'settings:get-notebook-network-status',
     readonly [],
@@ -520,6 +535,11 @@ const settingsCoreApplicationCommands = Object.freeze({
     readonly [request: SetReviewerModelRequest],
     StoreResult<'setReviewerModel'>
   >('settings:set-reviewer-model'),
+  setPromptOptimizationModel: defineApplicationCommand<
+    'settings:set-prompt-optimization-model',
+    readonly [request: SetPromptOptimizationModelRequest],
+    StoreResult<'setPromptOptimizationModel'>
+  >('settings:set-prompt-optimization-model'),
   selectWslProfile: defineApplicationCommand<
     'settings:select-wsl-profile',
     readonly [request: SelectWslProfileRequest],
@@ -585,6 +605,8 @@ const settingsCoreApplicationCommandGroup = defineApplicationCommandGroup('setti
   settingsCoreApplicationCommands.getGitHubTokenStatus,
   settingsCoreApplicationCommands.getPackageMirror,
   settingsCoreApplicationCommands.reviewNotebookPrivateDestination,
+  settingsCoreApplicationCommands.getSourceLinkMetadata,
+  settingsCoreApplicationCommands.getSourceLinkImage,
   settingsCoreApplicationCommands.getNotebookNetworkStatus,
   settingsCoreApplicationCommands.getLocalShellRuntimePreference,
   settingsCoreApplicationCommands.getWsl2BashPreviewStatus,
@@ -641,6 +663,7 @@ const settingsCoreApplicationCommandGroup = defineApplicationCommandGroup('setti
   settingsCoreApplicationCommands.setNotebookNetwork,
   settingsCoreApplicationCommands.setProjectFilesFilter,
   settingsCoreApplicationCommands.setReviewerModel,
+  settingsCoreApplicationCommands.setPromptOptimizationModel,
   settingsCoreApplicationCommands.selectWslProfile,
   settingsCoreApplicationCommands.switchLocalShellToPowerShell,
   settingsCoreApplicationCommands.useWsl2Bash,
@@ -729,6 +752,8 @@ const registerCoreSettingsApplicationCommands = (
         requireLocalCaller(callerContext, 'settings:review-notebook-private-destination')
         return dependencies.service.reviewNotebookPrivateDestination(args[0])
       },
+      'settings:get-source-link-metadata': ({ args }) => readSourceLinkMetadata(args[0]),
+      'settings:get-source-link-image': ({ args }) => readSourceLinkImage(args[0]),
       'settings:get-notebook-network-status': () => dependencies.service.getNotebookNetworkStatus(),
       'settings:get-local-shell-runtime-preference': ({ callerContext }) => {
         requireLocalCaller(callerContext, 'settings:get-local-shell-runtime-preference')
@@ -913,6 +938,10 @@ const registerCoreSettingsApplicationCommands = (
       'settings:set-reviewer-model': ({ args }) =>
         dependencies.snapshotCommits.currentSnapshotAfter(
           dependencies.service.setReviewerModel(readReviewerModel(args[0]))
+        ),
+      'settings:set-prompt-optimization-model': ({ args }) =>
+        dependencies.snapshotCommits.currentSnapshotAfter(
+          dependencies.service.setPromptOptimizationModel(readSubagentModel(args[0]))
         ),
       'settings:select-wsl-profile': ({ args, callerContext }) => {
         requireLocalCaller(callerContext, 'settings:select-wsl-profile')

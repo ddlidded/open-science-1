@@ -1,3 +1,4 @@
+import { ProviderAcpValidator } from './provider-acp-validation'
 import { SkillSourceRepository } from '../skills/source-repository'
 import type {
   SavedSkillSource,
@@ -39,6 +40,12 @@ import { ClaudeCodeSkillMaterializer } from '../skills/materializer'
 import { ClassificationSettingsOwner } from './classification-settings'
 import { ClassificationUsageRecorder } from './classification-usage'
 import { ProviderRuntimeHealthOwner } from './provider-runtime-health-owner'
+import { ProviderTransportOwner } from './provider-transport-owner'
+import {
+  HarnessSessionOwner,
+  type HarnessSession,
+  type HarnessSessionRequest
+} from './harness-session-owner'
 
 import {
   createLogger,
@@ -110,6 +117,7 @@ import type {
   ResolveSkillDocumentRequest,
   ResolvedSkillDocument,
   ReviewerModelConfiguration,
+  PromptOptimizationModelConfiguration,
   SaveValidatedProviderResult,
   ScanRepoRequest,
   ScanRepoResult,
@@ -140,6 +148,7 @@ import type {
   ValidateProviderResult,
   VisionModelConfiguration as VisionModel
 } from '../../shared/settings'
+import { isCodexSubscriptionProvider } from '../../shared/settings'
 import type { CloseActionPreference } from '../../shared/window-controls'
 import type {
   InstallMissingWslDependenciesRequest,
@@ -468,7 +477,9 @@ class SettingsService {
   private readonly providers: ProviderAccountsModule
   private readonly runtimeManager: AgentRuntimeManager
   private readonly installCoordinator: SettingsInstallCoordinator
+  private readonly providerAcpValidator: ProviderAcpValidator
   private readonly backendResolver: AgentBackendResolver
+  private readonly harnessSessions: HarnessSessionOwner
   private readonly scenarioModels: ScenarioModelOwner
   private readonly skillSources: SkillSourceRepository
   private readonly configRoot: string
@@ -509,14 +520,20 @@ class SettingsService {
     return this.installCoordinator.holdAdmission()
   }
 
+  quiesceAuthentication(): ReturnType<ProviderAccountsModule['quiesceAuthentication']> {
+    return this.providers.quiesceAuthentication()
+  }
+
   private readonly detachSkillDiagnostics: () => void
 
   async dispose(): Promise<void> {
     const outcomes = await Promise.allSettled([
       this.skillMarketplaceQueue.dispose(),
+      this.providerAcpValidator.dispose(),
       this.providers.dispose(),
       this.classification.flushUsage(false),
-      this.runtimeManager.dispose()
+      this.runtimeManager.dispose(),
+      this.harnessSessions.dispose()
     ])
     this.detachSkillDiagnostics()
     for (const outcome of outcomes) {
@@ -625,9 +642,17 @@ class SettingsService {
       userClaudeDir: this.userClaudeDir,
       userCodexDir,
       allocateSettingsIdSequence,
-      resolveCodexExecutable: (adapterPath, nativePath) =>
-        this.runtimeManager.resolveCodexExecutable(adapterPath, nativePath),
+      resolveCodexExecutable: async (adapterPath, nativePath, prepareForHarness) => {
+        if (
+          prepareForHarness ||
+          (await this.repository.getSettings()).agentFrameworkId === 'open-science-agent'
+        )
+          return this.runtimeManager.prepareCodexAuthenticationRuntime()
+        return this.runtimeManager.resolveCodexExecutable(adapterPath, nativePath)
+      },
       resolveCodexProxyEnvironment: () => this.runtimeManager.resolveCodexProxyEnvironment(),
+      runAcpValidation: (provider, settings) =>
+        this.providerAcpValidator.validate(provider, settings),
       runClaudeSubscriptionProbe: (provider, settings) =>
         this.runtimeManager.runClaudeSubscriptionProbe(provider, settings),
       codexAuth: options.codexAuth,
@@ -638,6 +663,14 @@ class SettingsService {
       this.repository,
       options.onProviderHealthChanged
     )
+    this.harnessSessions = new HarnessSessionOwner(
+      this.repository,
+      new ProviderTransportOwner({
+        onProviderFailure: (target, failure) => providerHealth.observe(target, failure),
+        getXaiOAuthAccessToken: (forceRefresh) =>
+          this.providers.getXaiOAuthAccessToken(forceRefresh)
+      })
+    )
     this.backendResolver = new AgentBackendResolver({
       onProviderFailure: (target, failure) => providerHealth.observe(target, failure),
       readSettings: () => this.repository.getSettings(),
@@ -647,8 +680,14 @@ class SettingsService {
       storageRoot: this.configRoot,
       userClaudeDir: this.userClaudeDir,
       skillRuntimeMcpEntryPath: options.skillRuntimeMcpEntryPath ?? process.argv[1] ?? '',
+      bindCodexHarnessConnection: (target) => this.providers.bindCodexHarnessConnection(target),
       getXaiOAuthAccessToken: (forceRefresh) => this.providers.getXaiOAuthAccessToken(forceRefresh)
     })
+    this.providerAcpValidator = new ProviderAcpValidator(
+      this.configRoot,
+      (provider, settings, storageRoot) =>
+        this.backendResolver.resolveValidationTarget(provider, settings, storageRoot)
+    )
     this.detachSkillDiagnostics = attachSkillDiagnostics()
     this.scenarioModels = createScenarioModels(
       this.repository,
@@ -676,6 +715,16 @@ class SettingsService {
         ...buildSettingsSnapshot(settings, this.runtimeManager, this.providers),
         credentialStore: getCredentialStore()
       }
+      await Promise.all(
+        snapshot.providers.map(async (view) => {
+          if (!isCodexSubscriptionProvider(view.type)) return
+          const provider = settings.providers.find(({ id }) => id === view.id)!
+          view.codexHarnessAvailable = await this.providers.isProviderKeyUsable(
+            provider,
+            'open-science-agent'
+          )
+        })
+      )
       operation.complete({ providerCount: settings.providers.length })
       return snapshot
     } catch (error) {
@@ -724,6 +773,20 @@ class SettingsService {
 
   async setAgentEnvironmentCreationEnabled(enabled: boolean): Promise<boolean> {
     return this.notebookRuntimeSettings.setAgentEnvironmentCreationEnabled(enabled)
+  }
+
+  async getComputePythonRuntime(
+    provider: import('../../shared/compute-accounts').ComputeAccountProvider
+  ): Promise<import('../../shared/compute-python-runtime').ComputePythonSelection | undefined> {
+    const settings = await this.repository.getSettings()
+    return provider === 'modal' ? settings.modalRuntime : settings.huggingFaceRuntime
+  }
+
+  setComputePythonRuntime(
+    provider: import('../../shared/compute-accounts').ComputeAccountProvider,
+    selection: import('../../shared/compute-python-runtime').ComputePythonSelection
+  ): Promise<void> {
+    return this.repository.setComputePythonRuntime(provider, selection)
   }
 
   async getManualInterpreters(language: NotebookLanguage): Promise<string[]> {
@@ -794,6 +857,20 @@ class SettingsService {
       )
     }
     return settings
+  }
+
+  async allowNotebookNetworkDestination(
+    grant: import('../../shared/network-destination-grants').NetworkDestinationGrant,
+    assertCurrent?: () => Promise<void>,
+    finalize?: () => Promise<void>
+  ): Promise<NotebookNetworkSettings> {
+    const result = await this.notebookNetwork.allowDestination(grant, assertCurrent, finalize)
+    try {
+      await this.onNotebookNetworkDomainAllowed?.()
+    } catch (error) {
+      this.log.warn('Network settings publication failed.', diagnosticErrorFields(error))
+    }
+    return result
   }
 
   getNotebookNetworkStatus(): Promise<NotebookNetworkStatus> {
@@ -1013,6 +1090,13 @@ class SettingsService {
 
   async setReviewerModel(configuration: ReviewerModelConfiguration): Promise<SettingsSnapshot> {
     await this.scenarioModels.reviewer.set(configuration)
+    return this.getSettingsView()
+  }
+
+  async setPromptOptimizationModel(
+    configuration: PromptOptimizationModelConfiguration
+  ): Promise<SettingsSnapshot> {
+    await this.repository.setPromptOptimizationModel(configuration)
     return this.getSettingsView()
   }
 
@@ -2077,6 +2161,13 @@ class SettingsService {
     context: AgentBackendResolutionContext = {}
   ): Promise<ResolvedAgentBackend> {
     return this.backendResolver.resolveSelection(selection, context)
+  }
+
+  openHarnessSession(
+    request: HarnessSessionRequest,
+    lifetime: AbortSignal
+  ): Promise<HarnessSession> {
+    return this.harnessSessions.open(request, lifetime)
   }
 }
 

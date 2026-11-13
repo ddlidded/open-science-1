@@ -1,3 +1,4 @@
+import { providerValidationRoute } from '../../shared/settings'
 import { installManagedPi, uninstallManagedPi } from './managed-pi'
 import { nodeRuntimeEnvironment } from '../node-process-host'
 import { resolveClaudeExecutableForSpawn } from '../acp/claude-executable'
@@ -28,6 +29,7 @@ import type {
 } from '../../shared/settings'
 import {
   isProviderUsableByFramework,
+  DEFAULT_ENDPOINT_ORDER,
   preferredEndpoint,
   requiresChatCompletionsBridge
 } from '../../shared/settings'
@@ -519,16 +521,19 @@ export class AgentRuntimeManager {
         : false
       const activeValidationTarget = activeProvider
         ? {
+            ...providerValidationRoute(
+              { ...activeProvider, apiEndpoints: activeEndpoints },
+              framework.id
+            ),
             model: activeModel,
             endpoint: preferredEndpoint(
               activeEndpoints ?? [],
               activeProvider.type === 'xai-subscription'
                 ? (['responses'] as const)
-                : framework.id === 'codex'
-                  ? (['messages', 'chat-completions', 'responses'] as const)
-                  : requiresChatCompletionsBridge({ apiEndpoints: activeEndpoints }, framework)
-                    ? (activeEndpoints ?? [])
-                    : framework.supportedApiTypes
+                : framework.id === 'codex' ||
+                    requiresChatCompletionsBridge({ apiEndpoints: activeEndpoints }, framework)
+                  ? DEFAULT_ENDPOINT_ORDER
+                  : framework.supportedApiTypes
             )
           }
         : undefined
@@ -601,6 +606,11 @@ export class AgentRuntimeManager {
         storageRoot: this.configRoot,
         agentFrameworkId,
         frameworks: [
+          {
+            id: 'open-science-agent',
+            label: 'Open-Science Agent',
+            runtime: { found: true, version: '0.1.0' }
+          },
           {
             id: 'claude-code',
             label: getAgentFramework('claude-code').displayName,
@@ -771,6 +781,28 @@ export class AgentRuntimeManager {
         if (cached && !(await this.pathExists(cached))) await this.repository.clearCodexInfo()
       }
     }, signal)
+  }
+
+  async prepareCodexAuthenticationRuntime(): Promise<string> {
+    const resolve = async (): Promise<string> => {
+      const { codex } = await this.repository.getSettings()
+      return this.resolveCodexExecutable(codex?.resolvedPath, codex?.nativePath)
+    }
+    try {
+      return await resolve()
+    } catch {
+      await this.detectCodex()
+    }
+    try {
+      return await resolve()
+    } catch {
+      const result = await this.installCodex({ source: 'managed' }, () => undefined)
+      if (!result.ok)
+        throw new Error(
+          'Codex authentication runtime could not be prepared. Install Codex in Settings.'
+        )
+    }
+    return resolve()
   }
 
   async bootstrapCodex(onEvent: (event: ClaudeInstallEvent) => void): Promise<void> {
@@ -1276,7 +1308,8 @@ export class AgentRuntimeManager {
   }
 
   async probeOpencodeVersion(executablePath: string): Promise<string | undefined> {
-    return this.opencodeDetectDeps.getVersion(executablePath).catch(() => undefined)
+    const probe = this.opencodeDetectDeps.probeVersion ?? this.opencodeDetectDeps.getVersion
+    return probe(executablePath)
   }
 
   async resolveCodeBuddyExecutable(storedPath: string | undefined): Promise<string> {
