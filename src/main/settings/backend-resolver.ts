@@ -1,6 +1,7 @@
 import { ProviderRuntimeProjectionOwner } from './provider-runtime-projection'
 import type { StoredProvider } from './types'
 import { randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import type { GrantedLocalRoot } from '../../shared/local-fs'
@@ -617,14 +618,18 @@ export class AgentBackendResolver {
             ? codexSkillRuntimeRoot
             : framework.id === 'pi'
               ? piSkillRuntimeRoot
-              : opencodeConfigDir(this.storageRoot)
+              : framework.id === 'devin'
+                ? join(homedir(), '.agents')
+                : opencodeConfigDir(this.storageRoot)
       skillDiscovery = includeSkillAndConnectorContext
         ? await this.runtime.prepareAgentSkillDiscovery(
             settings,
             skillsRoot,
             forcedSkillIds,
             context.skillWhitelist,
-            ...(framework.id === 'codebuddy' ? [{ directoryLayout: 'agent-facing' as const }] : [])
+            ...(framework.id === 'codebuddy' || framework.id === 'devin'
+              ? [{ directoryLayout: 'agent-facing' as const }]
+              : [])
           )
         : skillDiscovery
       connectorInstructions = includeSkillAndConnectorContext ? renderConnectorInstructions() : ''

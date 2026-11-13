@@ -1917,6 +1917,9 @@ export const providerValidationRoute = (
     case 'pi':
       route = 'pi'
       break
+    case 'devin':
+      route = 'devin'
+      break
     case 'open-science-agent':
       route = 'open-science-agent'
       break

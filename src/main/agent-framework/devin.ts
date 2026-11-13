@@ -53,7 +53,7 @@ export const createDevinFramework = ({
   displayName: 'Devin',
   commandShellDialect: platform === 'win32' ? 'powershell' : 'posix',
   contextCompaction: { kind: 'native-command', command: '/compact' },
-  supportsSkills: false,
+  supportsSkills: true,
   supportsDelegatedWork: isProductionDelegatedWorkFramework('devin'),
   acceptsStdioMcp: true,
   supportsLiveEffortChange: true,
