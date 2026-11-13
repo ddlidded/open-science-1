@@ -14,6 +14,10 @@ import type { ResolvedProvider } from '../settings/provider-env'
 import { augmentedPathEnv } from '../settings/shell-path'
 import { isProductionDelegatedWorkFramework } from '../delegation/production-readiness'
 import { renderAppMcpToolReferences } from './app-mcp-names'
+import {
+  createSkillRuntimeAcpServerConfig,
+  OPEN_SCIENCE_SKILL_RUNTIME_SESSION_OPTION
+} from '../skills/runtime-mcp-server'
 import type {
   AgentFramework,
   AgentModelConfig,
@@ -91,11 +95,42 @@ export const createDevinFramework = ({
   },
 
   buildSessionSetup(ctx: SessionSetupContext): SessionSetup {
+    const runtime = ctx.sessionOptions?.[OPEN_SCIENCE_SKILL_RUNTIME_SESSION_OPTION] as
+      | {
+          command?: string
+          entryPath?: string
+          root?: string
+          skillsDirectory?: string
+          allowedNames?: string[]
+        }
+      | undefined
+    const loaderAvailable =
+      ctx.skillRuntimeScope !== undefined &&
+      (ctx.skillRuntimeScope === 'all' || ctx.skillRuntimeScope.length > 0) &&
+      typeof runtime?.command === 'string' &&
+      typeof runtime.entryPath === 'string' &&
+      typeof runtime.root === 'string' &&
+      typeof runtime.skillsDirectory === 'string'
     const promptPrefix = [...ctx.systemPromptAppends, ...(ctx.turnPromptReminders ?? [])]
       .filter((append): append is string => Boolean(append))
       .map((append) => renderAppMcpToolReferences('devin', append))
       .join('\n\n')
-    return { ...(promptPrefix ? { promptPrefix } : {}) }
+    return {
+      ...(loaderAvailable
+        ? {
+            mcpServers: [
+              createSkillRuntimeAcpServerConfig({
+                command: runtime!.command!,
+                entryPath: runtime!.entryPath!,
+                root: runtime!.root!,
+                skillsDirectory: runtime!.skillsDirectory!,
+                ...(ctx.skillRuntimeScope !== 'all' ? { allowedNames: ctx.skillRuntimeScope } : {})
+              })
+            ]
+          }
+        : {}),
+      ...(promptPrefix ? { promptPrefix } : {})
+    }
   },
 
   mapPermissionProfile(
