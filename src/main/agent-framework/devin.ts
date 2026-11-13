@@ -3,6 +3,9 @@ import {
   type ChildProcessWithoutNullStreams,
   type SpawnOptionsWithoutStdio
 } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type { SessionModeState } from '@agentclientprotocol/sdk'
 
 import type { PermissionProfileId } from '../../shared/permission-profiles'
@@ -42,6 +45,24 @@ type DevinFrameworkDeps = {
 // The provider's own account default: selecting it leaves `devin acp` on its configured/enterprise
 // model instead of pinning one with --model. Devin's live model catalog is negotiated over ACP.
 export const DEVIN_DEFAULT_MODEL = 'default'
+
+// Devin's ACP server ignores the CLI credential store by design, but accepts `meta.api_key` on
+// the authenticate request. Reusing the `devin auth login` key avoids reopening the PKCE browser
+// flow for every new connection.
+const devinApiKey = (sourceEnv: NodeJS.ProcessEnv): string | undefined => {
+  const fromEnv = sourceEnv.WINDSURF_API_KEY ?? sourceEnv.DEVIN_API_KEY
+  if (fromEnv?.trim()) return fromEnv.trim()
+  try {
+    const credentials = readFileSync(
+      join(homedir(), '.local', 'share', 'devin', 'credentials.toml'),
+      'utf8'
+    )
+    const match = credentials.match(/^\s*windsurf_api_key\s*=\s*"([^"]+)"/m)
+    return match?.[1]?.trim() || undefined
+  } catch {
+    return undefined
+  }
+}
 
 // Devin is a self-contained agent: it authenticates against Cognition's service through
 // `devin auth login` (or an inherited WINDSURF_API_KEY) and advertises its own model, thinking
@@ -87,9 +108,14 @@ export const createDevinFramework = ({
     return {
       ...(model && model !== DEVIN_DEFAULT_MODEL ? { args: ['--model', model] } : {}),
       // Devin's ACP server deliberately ignores the CLI's local credential store — the host must
-      // authenticate each connection over ACP. `devin-browser` is the advertised method and drives
-      // the PKCE browser sign-in; the request resolves once that flow completes.
-      authentication: { methodId: 'devin-browser' },
+      // authenticate each connection over ACP. Passing the stored API key as meta.api_key resolves
+      // silently; without it `devin-browser` drives the PKCE browser sign-in.
+      authentication: (() => {
+        const apiKey = devinApiKey(sourceEnv)
+        return apiKey
+          ? { methodId: 'devin-browser', _meta: { api_key: apiKey } }
+          : { methodId: 'devin-browser' }
+      })(),
       env: {}
     }
   },
