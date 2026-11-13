@@ -9,7 +9,8 @@ describe('agent framework registry', () => {
       'opencode',
       'codex',
       'codebuddy',
-      'pi'
+      'pi',
+      'devin'
     ])
     expect(getAgentFramework('codex')).toMatchObject({
       displayName: 'Codex',
@@ -35,7 +36,8 @@ describe('agent framework registry', () => {
       { id: 'opencode', supportsDelegatedWork: true },
       { id: 'codex', supportsDelegatedWork: true },
       { id: 'codebuddy', supportsDelegatedWork: true },
-      { id: 'pi', supportsDelegatedWork: true }
+      { id: 'pi', supportsDelegatedWork: true },
+      { id: 'devin', supportsDelegatedWork: false }
     ])
   })
 

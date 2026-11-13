@@ -7751,6 +7751,8 @@
     "Retrieved via {{source}}.": "{{source}} から取得しました。",
     "Edit reference details": "文献情報を編集",
     "Edit details": "詳細を編集",
-    "Back to review": "確認に戻る"
+    "Back to review": "確認に戻る",
+    "Cognition's coding agent, connected through the Devin CLI's built-in ACP server.": "Devin CLI 組み込みの ACP サーバー経由で接続する Cognition のコーディングエージェント。",
+    "Devin CLI is required for this framework. Install it separately (see <docs>devin.ai/cli</docs>), run Re-detect, then sign in with `devin auth login`.": "このフレームワークには Devin CLI が必要です。別途インストールし（<docs>devin.ai/cli</docs> を参照）、「再検出」を実行してから `devin auth login` でサインインしてください。"
   }
 }

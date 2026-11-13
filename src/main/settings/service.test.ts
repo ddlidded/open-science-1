@@ -188,6 +188,8 @@ const createService = (
     opencodeDetected?: { path: string; version: string }
     // When set, CodeBuddy detection resolves this path/version; otherwise it finds nothing.
     codebuddyDetected?: { path: string; version: string }
+    // When set, Devin detection resolves this path/version; otherwise it finds nothing.
+    devinDetected?: { path: string; version: string }
     allocateOpenCodeUsagePort?: () => Promise<number>
     codexDetected?: { path: string; version: string; nativePath?: string; nativeVersion?: string }
     managedCodexAdapterPath?: string
@@ -265,6 +267,17 @@ const createService = (
       getVersion: (path) =>
         Promise.resolve(
           path === options.codebuddyDetected?.path ? options.codebuddyDetected.version : undefined
+        ),
+      resolveNpmBinDirs: () => Promise.resolve([])
+    },
+    devinDetectDeps: {
+      env: options.devinDetected ? { PATH: dirname(options.devinDetected.path) } : {},
+      homePath: '/home',
+      platform: 'linux',
+      isExecutable: (path) => Promise.resolve(path === options.devinDetected?.path),
+      getVersion: (path) =>
+        Promise.resolve(
+          path === options.devinDetected?.path ? options.devinDetected.version : undefined
         ),
       resolveNpmBinDirs: () => Promise.resolve([])
     },
@@ -2472,6 +2485,7 @@ describe('SettingsService: preflight & spawn config', () => {
       codexReady: false,
       codebuddyReady: false,
       piReady: false,
+      devinReady: false,
       agentFrameworkId: 'claude-code',
       agentReady: true,
       activeProviderReady: true,
@@ -5869,14 +5883,16 @@ describe('checkEnvironment', () => {
       'OpenCode runtime',
       'Codex native CLI',
       'Codex ACP adapter',
-      'CodeBuddy runtime'
+      'CodeBuddy runtime',
+      'Devin runtime'
     ])
     expect(agentRows.map((row) => row.status)).toEqual([
       'passed',
       'passed',
       'warning',
       'warning',
-      'passed'
+      'passed',
+      'warning'
     ])
     expect(result.agentFrameworkId).toBe('opencode')
     expect(result.runtime).toEqual({
@@ -5915,7 +5931,8 @@ describe('checkEnvironment', () => {
       'OpenCode runtime:failed',
       'Codex native CLI:warning',
       'Codex ACP adapter:warning',
-      'CodeBuddy runtime:passed'
+      'CodeBuddy runtime:passed',
+      'Devin runtime:warning'
     ])
     // Selection drives readiness: the missing selected runtime blocks Continue even though Claude runs.
     expect(result.agentFrameworkId).toBe('opencode')
@@ -5938,7 +5955,8 @@ describe('SettingsService: managed-runtime flags', () => {
       { id: 'opencode', supportsDelegatedWork: true },
       { id: 'codex', supportsDelegatedWork: true },
       { id: 'codebuddy', supportsDelegatedWork: true },
-      { id: 'pi', supportsDelegatedWork: true }
+      { id: 'pi', supportsDelegatedWork: true },
+      { id: 'devin', supportsDelegatedWork: false }
     ])
   })
 

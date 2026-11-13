@@ -94,6 +94,7 @@ type CoreSettingsCommandStore = Pick<
   | 'detectClaude'
   | 'detectCodeBuddy'
   | 'detectCodex'
+  | 'detectDevin'
   | 'detectOpencode'
   | 'getConnectorDetail'
   | 'getPackageMirror'
@@ -248,6 +249,11 @@ const settingsCoreApplicationCommands = Object.freeze({
     readonly [],
     StoreResult<'detectOpencode'>
   >('settings:detect-opencode'),
+  detectDevin: defineApplicationCommand<
+    'settings:detect-devin',
+    readonly [],
+    StoreResult<'detectDevin'>
+  >('settings:detect-devin'),
   getGitHubTokenStatus: defineApplicationCommand<
     'settings:get-github-token-status',
     readonly [],
@@ -572,6 +578,7 @@ const settingsCoreApplicationCommandGroup = defineApplicationCommandGroup('setti
   settingsCoreApplicationCommands.detectClaude,
   settingsCoreApplicationCommands.detectCodeBuddy,
   settingsCoreApplicationCommands.detectCodex,
+  settingsCoreApplicationCommands.detectDevin,
   settingsCoreApplicationCommands.detectOpencode,
   settingsCoreApplicationCommands.getConnectorDetail,
   settingsCoreApplicationCommands.getClassification,
@@ -703,6 +710,8 @@ const registerCoreSettingsApplicationCommands = (
         dependencies.snapshotCommits.currentSnapshotAfter(dependencies.service.detectCodeBuddy()),
       'settings:detect-codex': () =>
         dependencies.snapshotCommits.currentSnapshotAfter(dependencies.service.detectCodex()),
+      'settings:detect-devin': () =>
+        dependencies.snapshotCommits.currentSnapshotAfter(dependencies.service.detectDevin()),
       'settings:detect-opencode': () =>
         dependencies.snapshotCommits.currentSnapshotAfter(dependencies.service.detectOpencode()),
       'settings:get-connector-detail': ({ args }) =>

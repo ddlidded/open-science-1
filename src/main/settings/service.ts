@@ -182,6 +182,7 @@ import type { ClaudeDetectDeps } from './claude-detect'
 import type { ClaudeIsolatedAuthControllerPort } from './claude-isolated-auth'
 import type { ClaudeSharedAuthControllerPort } from './claude-shared-auth'
 import type { CodeBuddyDetectDeps } from './codebuddy-detect'
+import type { DevinDetectDeps } from './devin-detect'
 import type { CodexAuthControllerPort } from './codex-auth'
 import type { CodexDetectDeps } from './codex-detect'
 import type {
@@ -230,6 +231,7 @@ export type SettingsServiceOptions = {
   detectDeps?: ClaudeDetectDeps
   opencodeDetectDeps?: OpencodeDetectDeps
   codebuddyDetectDeps?: CodeBuddyDetectDeps
+  devinDetectDeps?: DevinDetectDeps
   // Reserves the authenticated loopback HTTP port exposed by `opencode acp`. Injectable so settings
   // tests do not bind real sockets.
   allocateOpenCodeUsagePort?: () => Promise<number>
@@ -608,6 +610,7 @@ class SettingsService {
       detectDeps: options.detectDeps,
       opencodeDetectDeps: options.opencodeDetectDeps,
       codebuddyDetectDeps: options.codebuddyDetectDeps,
+      devinDetectDeps: options.devinDetectDeps,
       codexDetectDeps: options.codexDetectDeps,
       allocateOpenCodeUsagePort: options.allocateOpenCodeUsagePort,
       executeClaudeProbe: options.executeClaudeProbe,
@@ -1123,6 +1126,11 @@ class SettingsService {
 
   async detectOpencode(): Promise<SettingsSnapshot> {
     await this.runtimeManager.detectOpencode()
+    return this.getSettingsView()
+  }
+
+  async detectDevin(): Promise<SettingsSnapshot> {
+    await this.runtimeManager.detectDevin()
     return this.getSettingsView()
   }
 

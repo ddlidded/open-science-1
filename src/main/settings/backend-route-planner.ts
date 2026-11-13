@@ -123,6 +123,7 @@ const modelRouteFor = (
   }
   if (frameworkId === 'codebuddy') return 'codebuddy-openai'
   if (frameworkId === 'pi') return 'pi'
+  if (frameworkId === 'devin') return 'devin'
   if (target.needsChatResponsesToChatCompletionsBridge) return 'codex-bridge'
   if (target.needsNativeResponsesCompatibility) return 'codex-responses-compatibility'
   return 'codex-responses'
@@ -393,6 +394,8 @@ class BackendRoutePlanner {
         initialTargetId: transportTargetId(frameworkId, active.providerId, model)
       })
     }
+    // Devin owns its entire upstream transport; the app never routes a provider endpoint into it.
+    if (frameworkId === 'devin') return Object.freeze({ kind: 'direct' })
     if (frameworkId === 'codebuddy') {
       if (active.apiEndpoints.includes('chat-completions')) return Object.freeze({ kind: 'direct' })
       return Object.freeze({
@@ -468,9 +471,11 @@ class BackendRoutePlanner {
                 : normalizeMessagesRootUrl(candidate.provider.baseUrl ?? '')
               : frameworkId === 'codebuddy'
                 ? resolveChatCompletionsUrl(candidate.provider)
-                : route === 'codex-bridge'
-                  ? resolveChatCompletionsBaseUrl(candidate.provider)
-                  : resolveResponsesBaseUrl(candidate.provider)
+                : frameworkId === 'devin'
+                  ? 'devin'
+                  : route === 'codex-bridge'
+                    ? resolveChatCompletionsBaseUrl(candidate.provider)
+                    : resolveResponsesBaseUrl(candidate.provider)
       const id = model
         ? frameworkId === 'claude-code'
           ? claudeTargetId(candidate.providerId, model)

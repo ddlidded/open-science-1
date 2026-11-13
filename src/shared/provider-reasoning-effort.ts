@@ -82,6 +82,11 @@ export const resolveProviderReasoningEffortProfile = (
       return model ? resolveVendorModelReasoningEffort('anthropic', model) : { supported: false }
     case 'xai-subscription':
       return resolveVendorModelReasoningEffort('xai', model)
+    // Devin's thinking levels (low/medium/high/xhigh/max) match the app's standard five-level preset;
+    // the runtime delivers the selection through the ACP session effort configOption rather than a
+    // provider transport.
+    case 'devin':
+      return resolveReasoningEffortProfile(provider.reasoningEffortPreset)
     case 'custom':
       return resolveReasoningEffortProfile(provider.reasoningEffortPreset)
   }

@@ -74,6 +74,9 @@ export const settingsDetectClaudeContracts = {
   'settings.detectCodex': callable<() => Promise<SettingsSnapshot>>()('settings', [
     'settings:detect-codex'
   ]),
+  'settings.detectDevin': callable<() => Promise<SettingsSnapshot>>()('settings', [
+    'settings:detect-devin'
+  ]),
   'settings.detectOpencode': callable<() => Promise<SettingsSnapshot>>()('settings', [
     'settings:detect-opencode'
   ])

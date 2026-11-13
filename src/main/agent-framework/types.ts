@@ -98,6 +98,7 @@ export type AgentModelRoute =
   | 'codex-responses'
   | 'codex-responses-compatibility'
   | 'codex-bridge'
+  | 'devin'
 
 export type AgentModelCatalogEntry = Readonly<{
   provider: ResolvedProvider

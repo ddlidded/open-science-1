@@ -40,7 +40,10 @@ const REGISTRY_PROBE_PATHS: Record<AgentFrameworkId, string> = {
   opencode: '/opencode-ai/latest',
   codebuddy: '/@tencent-ai%2fcodebuddy-code/2.138.0',
   codex: '/@agentclientprotocol%2fcodex-acp/latest',
-  pi: '/@openma%2fpi-acp/0.1.8'
+  pi: '/@openma%2fpi-acp/0.1.8',
+  // Devin ships no app-managed install, so this path is never used to acquire it; it only keeps
+  // the per-framework registry probe total over the framework id union.
+  devin: '/devin/latest'
 }
 const REGISTRY_PROBE_TIMEOUT_MS = 5_000
 

@@ -7749,6 +7749,8 @@
     "Retrieved via {{source}}.": "{{source}}을(를) 통해 가져왔습니다.",
     "Edit reference details": "문헌 정보 편집",
     "Edit details": "세부 정보 편집",
-    "Back to review": "검토로 돌아가기"
+    "Back to review": "검토로 돌아가기",
+    "Cognition's coding agent, connected through the Devin CLI's built-in ACP server.": "Devin CLI에 내장된 ACP 서버를 통해 연결되는 Cognition의 코딩 에이전트.",
+    "Devin CLI is required for this framework. Install it separately (see <docs>devin.ai/cli</docs>), run Re-detect, then sign in with `devin auth login`.": "이 프레임워크에는 Devin CLI가 필요합니다. 별도로 설치하고(<docs>devin.ai/cli</docs> 참조), '다시 감지'를 실행한 다음 `devin auth login`으로 로그인하세요."
   }
 }

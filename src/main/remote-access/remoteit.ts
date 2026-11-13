@@ -127,6 +127,24 @@ const assertMutationSucceeded = (result: CommandResult): CommandResult => {
 const mutationArgsForPlatform = (args: string[], platform: NodeJS.Platform): string[] =>
   platform === 'win32' && !args.includes('--noAdmin') ? [...args, '--noAdmin'] : args
 
+const sudoAuthFailed = (error: unknown): boolean =>
+  /sudo: a password is required|a terminal is required/i.test(errorText(error))
+
+const runMacElevatedMutation = async (
+  binaryPath: string,
+  args: string[],
+  run: RemoteItCommandRunner
+): Promise<CommandResult> => {
+  try {
+    return await run('/usr/bin/sudo', ['-n', binaryPath, ...args], { timeoutMs: 120_000 })
+  } catch (sudoError) {
+    if (!sudoAuthFailed(sudoError)) throw sudoError
+  }
+  return run('/usr/bin/osascript', ['-e', buildMacElevationScript(binaryPath, args)], {
+    timeoutMs: 120_000
+  })
+}
+
 const runRemoteItMutation = async (
   binaryPath: string,
   args: string[],
@@ -140,11 +158,7 @@ const runRemoteItMutation = async (
   } catch (error) {
     if (!requiresElevation(error) || platform !== 'darwin') throw error
     try {
-      return assertMutationSucceeded(
-        await run('/usr/bin/osascript', ['-e', buildMacElevationScript(binaryPath, args)], {
-          timeoutMs: 120_000
-        })
-      )
+      return assertMutationSucceeded(await runMacElevatedMutation(binaryPath, args, run))
     } catch (elevatedError) {
       const detail = commandError(
         elevatedError,
@@ -175,6 +189,26 @@ const runRemoteItMutationBatch = async (
   timeoutMs = 30_000
 ): Promise<CommandResult[]> => {
   const runElevated = async (elevatedCommands: string[][]): Promise<CommandResult[]> => {
+    const sudoResults: CommandResult[] = []
+    let sudoAvailable = true
+    for (const elevatedArgs of elevatedCommands) {
+      try {
+        sudoResults.push(
+          assertMutationSucceeded(
+            await run('/usr/bin/sudo', ['-n', binaryPath, ...elevatedArgs], {
+              timeoutMs: 120_000
+            })
+          )
+        )
+      } catch (sudoError) {
+        if (sudoResults.length === 0 && sudoAuthFailed(sudoError)) {
+          sudoAvailable = false
+          break
+        }
+        throw sudoError
+      }
+    }
+    if (sudoAvailable) return sudoResults
     try {
       const elevated = await run(
         '/usr/bin/osascript',

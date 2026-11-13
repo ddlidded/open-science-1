@@ -284,6 +284,7 @@ export const WEB_INVOKE_CHANNELS = {
   'settings.detectClaude': 'settings:detect-claude',
   'settings.detectCodeBuddy': 'settings:detect-codebuddy',
   'settings.detectCodex': 'settings:detect-codex',
+  'settings.detectDevin': 'settings:detect-devin',
   'settings.detectOpencode': 'settings:detect-opencode',
   'settings.disconnectCustomServer': 'settings:disconnect-custom-server',
   'settings.disconnectDeviceCredential': 'settings:disconnect-device-credential',

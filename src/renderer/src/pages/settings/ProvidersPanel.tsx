@@ -229,6 +229,7 @@ const ProvidersPanel = ({
     if (provider.type === 'claude-isolated' || provider.type === 'claude-shared')
       return agentFrameworkId === 'claude-code'
     if (isCodexSubscriptionProvider(provider.type)) return agentFrameworkId === 'codex'
+    if (provider.type === 'devin') return agentFrameworkId === 'devin'
 
     return true
   })

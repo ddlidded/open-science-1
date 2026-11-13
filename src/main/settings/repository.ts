@@ -31,6 +31,7 @@ import {
   CLAUDE_SHARED_PROVIDER_ID,
   CODEX_SUBSCRIPTION_PROVIDER_ID,
   claudeIsolatedProviderIdentity,
+  devinProviderIdentity,
   isClaudeSubscriptionProvider,
   isClaudeSubscriptionProviderId,
   isCodexSubscriptionProvider
@@ -765,7 +766,35 @@ class SettingsRepository {
   }
 
   async setAgentFramework(id: AgentFrameworkId): Promise<StoredSettings> {
-    return this.mutate((settings) => ({ ...settings, agentFrameworkId: id }))
+    return this.mutate((settings) => {
+      // The Devin provider is the only record that can drive the Devin framework (its account owns
+      // auth and the model catalog). Seed it on selection so the provider/model pickers and the
+      // backend resolver have a compatible target without a manual add-provider step.
+      if (id !== 'devin') return { ...settings, agentFrameworkId: id }
+      const identity = devinProviderIdentity()
+      const existing = settings.providers.find((provider) => provider.id === identity.id)
+      const providers = existing
+        ? settings.providers
+        : [
+            ...settings.providers,
+            {
+              id: identity.id,
+              type: 'devin' as const,
+              name: identity.name,
+              model: 'default',
+              // Devin authentication lives in the CLI's own credential store, so there is nothing
+              // for the app to validate; the agent reports auth state in-session over ACP.
+              lastValidatedAt: Date.now()
+            }
+          ]
+      return {
+        ...settings,
+        agentFrameworkId: id,
+        providers,
+        activeProviderId: identity.id,
+        activeModel: existing?.model ?? 'default'
+      }
+    })
   }
 
   async setAgentRouting(
@@ -873,6 +902,23 @@ class SettingsRepository {
       const { codebuddyPath, codebuddyVersion, ...rest } = settings
       void codebuddyPath
       void codebuddyVersion
+      return rest
+    })
+  }
+
+  async setDevinInfo(resolvedPath: string, version?: string): Promise<StoredSettings> {
+    return this.mutate((settings) => ({
+      ...settings,
+      devinPath: resolvedPath,
+      devinVersion: version
+    }))
+  }
+
+  async clearDevinInfo(): Promise<StoredSettings> {
+    return this.mutate((settings) => {
+      const { devinPath, devinVersion, ...rest } = settings
+      void devinPath
+      void devinVersion
       return rest
     })
   }

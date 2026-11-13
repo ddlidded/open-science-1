@@ -8237,6 +8237,8 @@
     "Retrieved via {{source}}.": "Получено через {{source}}.",
     "Edit reference details": "Редактирование сведений о публикации",
     "Edit details": "Изменить сведения",
-    "Back to review": "Вернуться к проверке"
+    "Back to review": "Вернуться к проверке",
+    "Cognition's coding agent, connected through the Devin CLI's built-in ACP server.": "Агент кодирования Cognition, подключаемый через встроенный ACP-сервер Devin CLI.",
+    "Devin CLI is required for this framework. Install it separately (see <docs>devin.ai/cli</docs>), run Re-detect, then sign in with `devin auth login`.": "Для этого фреймворка требуется Devin CLI. Установите его отдельно (см. <docs>devin.ai/cli</docs>), выполните повторный поиск, затем войдите через `devin auth login`."
   }
 }

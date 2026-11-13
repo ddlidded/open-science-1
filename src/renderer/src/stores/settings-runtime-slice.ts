@@ -46,6 +46,7 @@ export type RuntimeSetupState = {
   isDetectingOpencode: boolean
   isDetectingCodex: boolean
   isDetectingCodeBuddy: boolean
+  isDetectingDevin: boolean
   installStates: Record<AgentFrameworkId, RuntimeInstallState>
 }
 
@@ -56,6 +57,7 @@ export type RuntimeSetupActions = {
   detectOpencode: () => Promise<void>
   detectCodex: () => Promise<void>
   detectCodeBuddy: () => Promise<void>
+  detectDevin: () => Promise<void>
   installClaude: (
     source: ClaudeInstallSource,
     managedRegistry?: ManagedClaudeRegistry
@@ -89,6 +91,7 @@ type RuntimeSetupCommands = Pick<
   | 'detectOpencode'
   | 'detectCodex'
   | 'detectCodeBuddy'
+  | 'detectDevin'
   | 'installClaude'
   | 'installOpencode'
   | 'installCodex'
@@ -151,12 +154,14 @@ export const createInitialRuntimeSetupState = (): RuntimeSetupState => ({
   isDetectingOpencode: false,
   isDetectingCodex: false,
   isDetectingCodeBuddy: false,
+  isDetectingDevin: false,
   installStates: {
     'claude-code': createInitialRuntimeInstallState(),
     opencode: createInitialRuntimeInstallState(),
     codex: createInitialRuntimeInstallState(),
     codebuddy: createInitialRuntimeInstallState(),
-    pi: createInitialRuntimeInstallState()
+    pi: createInitialRuntimeInstallState(),
+    devin: createInitialRuntimeInstallState()
   }
 })
 
@@ -209,6 +214,7 @@ const snapshotRuntimePath = (
   if (runtime === 'claude-code') return snapshot.claude.resolvedPath
   if (runtime === 'opencode') return snapshot.opencode.resolvedPath
   if (runtime === 'codex') return snapshot.codex?.resolvedPath
+  if (runtime === 'devin') return snapshot.devin?.resolvedPath
   return snapshot.codebuddy?.resolvedPath
 }
 
@@ -476,6 +482,15 @@ export const createRuntimeSetupSlice = <Store extends RuntimeSetupHost>({
     }
   },
 
+  detectDevin: async () => {
+    patchRuntimeSetupState(set, { isDetectingDevin: true })
+    try {
+      reconcileSnapshot(await getCommands().detectDevin())
+    } finally {
+      patchRuntimeSetupState(set, { isDetectingDevin: false })
+    }
+  },
+
   installClaude: (source, managedRegistry) =>
     runRuntimeInstall(set, get, getCommands, reconcileSnapshot, 'claude-code', (commands) =>
       commands.installClaude({ source, managedRegistry })
@@ -525,7 +540,7 @@ export const createRuntimeSetupSlice = <Store extends RuntimeSetupHost>({
     updateInstallStates(set, (current) => {
       const runtimes: AgentFrameworkId[] = runtime
         ? [runtime]
-        : ['claude-code', 'opencode', 'codex', 'codebuddy', 'pi']
+        : ['claude-code', 'opencode', 'codex', 'codebuddy', 'pi', 'devin']
       const installStates = { ...current }
 
       for (const id of runtimes) {

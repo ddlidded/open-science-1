@@ -200,6 +200,10 @@ export const defaultProviderKindKey = (
       return 'official:deepseek'
     case 'codebuddy':
       return 'official:minimax'
+    // Devin manages its own account and model catalog; it never opens a vendor provider form, so
+    // the preselected kind is irrelevant and only has to satisfy the exhaustive switch.
+    case 'devin':
+      return 'official:anthropic'
     default: {
       // The never assignment keeps the switch exhaustive at compile time. Persisted state could
       // still hold a stale value outside the union; this runs during render, so degrade to the

@@ -25,8 +25,10 @@ import {
 import { buildConfiguredModelUnavailableMessage } from '../../shared/failure/messages'
 import type { ProviderView } from '../../shared/settings'
 import {
+  DEVIN_MODEL_CATALOG,
   isClaudeSubscriptionProvider,
   isCodexSubscriptionProvider,
+  isDevinProvider,
   isProviderUsableByFramework,
   isXaiSubscriptionProvider,
   providerEndpoints,
@@ -229,6 +231,16 @@ class ProviderRuntimeProjectionOwner {
         : provider.keyRef
           ? tryDecryptKey(provider.keyRef)
           : undefined
+    if (isDevinProvider(provider.type)) {
+      // Devin authenticates and bills through its own CLI session; the resolved provider only
+      // carries the selected model alias forward to `devin acp --model`.
+      return {
+        type: provider.type,
+        model: modelOverride ?? provider.model ?? 'default',
+        apiEndpoints: [],
+        supportsImageInput: true
+      }
+    }
     if (isXaiSubscriptionProvider(provider.type)) {
       const model = modelOverride ?? provider.model ?? defaultVendorModel('xai')
       return {
@@ -300,6 +312,7 @@ class ProviderRuntimeProjectionOwner {
   }
 
   private providerSupportsImageInput(provider: StoredProvider, activeModel?: string): boolean {
+    if (isDevinProvider(provider.type)) return true
     if (isCodexSubscriptionProvider(provider.type)) return true
     if (isClaudeSubscriptionProvider(provider.type)) return true
     if (isXaiSubscriptionProvider(provider.type)) return true
@@ -314,6 +327,9 @@ class ProviderRuntimeProjectionOwner {
   }
 
   private availableModels(provider: StoredProvider): string[] {
+    if (isDevinProvider(provider.type)) {
+      return provider.fetchedModels?.length ? [...provider.fetchedModels] : [...DEVIN_MODEL_CATALOG]
+    }
     if (isCodexSubscriptionProvider(provider.type)) {
       return getOfficialVendorModelIds('openai')
     }

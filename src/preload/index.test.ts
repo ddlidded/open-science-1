@@ -89,6 +89,7 @@ type PreloadApi = {
     detectOpencode: () => unknown
     detectCodeBuddy: () => unknown
     detectCodex: () => unknown
+    detectDevin: () => unknown
     installOpencode: (request: unknown) => unknown
     installCodeBuddy: (request: unknown) => unknown
     installCodex: (request: unknown) => unknown
@@ -658,6 +659,7 @@ describe('preload bridge — public surface inventory', () => {
       'settings.detectClaude',
       'settings.detectCodeBuddy',
       'settings.detectCodex',
+      'settings.detectDevin',
       'settings.detectOpencode',
       'settings.disconnectCustomServer',
       'settings.disconnectDeviceCredential',
@@ -1593,6 +1595,12 @@ const cases: ForwardingCase[] = [
     invoke: (a) => a.settings.installOpencode(sampleInstall),
     channel: 'settings:install-opencode',
     args: [sampleInstall]
+  },
+  {
+    name: 'settings.detectDevin → settings:detect-devin (no args)',
+    invoke: (a) => a.settings.detectDevin(),
+    channel: 'settings:detect-devin',
+    args: []
   },
   {
     name: 'settings.detectCodeBuddy → settings:detect-codebuddy (no args)',

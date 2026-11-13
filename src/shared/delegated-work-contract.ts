@@ -30,6 +30,7 @@ export type ResolvedSubagentModelSnapshot = Readonly<{
     | 'codex-responses'
     | 'codex-responses-compatibility'
     | 'codex-bridge'
+    | 'devin'
   model: string
   reasoningEffort: ResolvedReasoningEffort
 }>

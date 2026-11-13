@@ -39,7 +39,7 @@ import { UninstallRuntimeDialog } from './UninstallRuntimeDialog'
 // The agent frameworks the settings page manages, keyed by their short name (used for the
 // uninstall dialog target and the framework card descriptors).
 type FrameworkKey = 'claude' | 'opencode' | 'codex' | 'codebuddy'
-type FrameworkCardKey = FrameworkKey | 'pi'
+type FrameworkCardKey = FrameworkKey | 'pi' | 'devin'
 
 type AgentPanelProps = {
   variant?: 'settings' | 'onboarding'
@@ -79,12 +79,16 @@ const AgentPanel = ({
   const codebuddy = useSettingsStore((state) => state.codebuddy)
   const isDetectingCodeBuddy = useSettingsStore((state) => state.isDetectingCodeBuddy)
   const detectCodeBuddy = useSettingsStore((state) => state.detectCodeBuddy)
+  const devin = useSettingsStore((state) => state.devin)
+  const isDetectingDevin = useSettingsStore((state) => state.isDetectingDevin)
+  const detectDevin = useSettingsStore((state) => state.detectDevin)
   const installCodeBuddy = useSettingsStore((state) => state.installCodeBuddy)
   // Per-runtime install slices: each card renders only its own progress/logs/error (issue #278).
   const claudeInstall = useSettingsStore((state) => state.installStates['claude-code'])
   const opencodeInstall = useSettingsStore((state) => state.installStates.opencode)
   const codexInstall = useSettingsStore((state) => state.installStates.codex)
   const codebuddyInstall = useSettingsStore((state) => state.installStates.codebuddy)
+  const devinInstall = useSettingsStore((state) => state.installStates.devin)
   const installPi = useSettingsStore((state) => state.installPi)
   const uninstallPi = useSettingsStore((state) => state.uninstallPi)
   const piInstall = useSettingsStore((state) => state.installStates.pi)
@@ -166,6 +170,7 @@ const AgentPanel = ({
     setIsUninstalling(true)
 
     try {
+      if (pendingUninstall === 'devin') return
       if (pendingUninstall === 'claude') await uninstallClaude()
       else if (pendingUninstall === 'opencode') await uninstallOpencode()
       else if (pendingUninstall === 'codex') await uninstallCodex()
@@ -285,7 +290,8 @@ const AgentPanel = ({
       opencode: preflight.opencodeReady,
       codex: codexReady,
       codebuddy: preflight.codebuddyReady,
-      pi: preflight.piReady === true
+      pi: preflight.piReady === true,
+      devin: preflight.devinReady === true
     }
     if (readyByFramework[agentFrameworkId]) return
 
@@ -302,6 +308,7 @@ const AgentPanel = ({
     codexReady,
     preflight.codebuddyReady,
     preflight.piReady,
+    preflight.devinReady,
     preflight.opencodeReady,
     queueOnboardingSwitch
   ])
@@ -309,7 +316,11 @@ const AgentPanel = ({
   // The section-level Re-detect re-scans all frameworks at once; the per-card detect buttons
   // were removed in favor of this single action.
   const isDetectingAnyFramework =
-    isDetectingClaude || isDetectingOpencode || isDetectingCodex || isDetectingCodeBuddy
+    isDetectingClaude ||
+    isDetectingOpencode ||
+    isDetectingCodex ||
+    isDetectingCodeBuddy ||
+    isDetectingDevin
   const handleDetectAllFrameworks = async (): Promise<void> => {
     setFrameworkDetectionError(undefined)
     setInstallActionError(undefined)
@@ -319,7 +330,8 @@ const AgentPanel = ({
       detectClaude(),
       detectOpencode(),
       detectCodex(),
-      detectCodeBuddy()
+      detectCodeBuddy(),
+      detectDevin()
     ])
     await checkEnvironment({ force: true })
 
@@ -534,6 +546,39 @@ const AgentPanel = ({
       }
     }
   ]
+
+  // Devin is always registered but never app-managed: the card surfaces the separately installed
+  // CLI (detected via `devin` on PATH / well-known locations) and offers no install or uninstall.
+  if (agentFrameworks.some(({ id }) => id === 'devin')) {
+    frameworkCards.push({
+      key: 'devin',
+      frameworkId: 'devin',
+      name: 'Devin',
+      icon: <AgentFrameworkIcon frameworkId="devin" size={24} />,
+      description: t(
+        "Cognition's coding agent, connected through the Devin CLI's built-in ACP server."
+      ),
+      ready: preflight.devinReady === true,
+      installed: Boolean(devin.resolvedPath),
+      version: devin.version,
+      path: devin.resolvedPath,
+      sourceLabel: 'cognition-ai/devin-cli',
+      sourceUrl: 'https://github.com/CognitionAI/devin-cli',
+      notReadyHint: (
+        <Trans
+          i18nKey="Devin CLI is required for this framework. Install it separately (see <docs>devin.ai/cli</docs>), run Re-detect, then sign in with `devin auth login`."
+          components={{
+            docs: <ExternalTextLink href="https://devin.ai/cli">{null}</ExternalTextLink>
+          }}
+        />
+      ),
+      uninstallCommand: '',
+      managed: false,
+      installSources: [],
+      install: devinInstall,
+      onInstall: () => Promise.resolve(undefined)
+    })
+  }
 
   // Main owns registration and readiness. Older/incomplete backends do not expose a Pi card.
   if (agentFrameworks.some(({ id }) => id === 'pi')) {

@@ -43,6 +43,7 @@ describe('computePreflight', () => {
       opencodeReady: false,
       codebuddyReady: false,
       codexReady: false,
+      devinReady: false,
       piReady: false,
       agentFrameworkId: 'claude-code',
       agentReady: true,

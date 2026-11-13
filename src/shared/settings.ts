@@ -53,6 +53,7 @@ export type ProviderType =
   | 'codex-shared'
   | 'codex-isolated'
   | 'xai-subscription'
+  | 'devin'
 
 // The stored Codex subscription always uses the app-owned runtime type. This discriminator preserves
 // which setup choice produced it so editing an imported profile does not masquerade as an isolated
@@ -78,6 +79,35 @@ export const CODEX_SUBSCRIPTION_PROVIDER_ID = 'builtin-codex-subscription'
 export const CLAUDE_SHARED_PROVIDER_ID = 'builtin-claude-shared'
 export const CLAUDE_ISOLATED_PROVIDER_ID = 'builtin-claude-isolated'
 export const XAI_SUBSCRIPTION_PROVIDER_ID = 'builtin-xai-subscription'
+export const DEVIN_PROVIDER_ID = 'builtin-devin'
+
+export const isDevinProvider = (type: ProviderType): type is 'devin' => type === 'devin'
+
+export const devinProviderIdentity = (): { id: string; name: string } => ({
+  id: DEVIN_PROVIDER_ID,
+  name: 'Devin'
+})
+
+// Devin's live model catalog is negotiated over ACP; this static list covers the documented fuzzy
+// family slugs and published model ids `devin acp --model` accepts ('default' leaves the CLI's
+// configured default intact). Short family names always resolve to the latest release in that family.
+export const DEVIN_MODEL_CATALOG: readonly string[] = Object.freeze([
+  'default',
+  'adaptive',
+  'swe',
+  'swe-1-7-lightning',
+  'swe-1-6-fast',
+  'opus',
+  'sonnet',
+  'fable',
+  'gpt-5',
+  'gpt-6',
+  'codex',
+  'gemini',
+  'deepseek',
+  'kimi',
+  'glm'
+])
 
 export const xaiSubscriptionProviderIdentity = (): { id: string; name: string } => ({
   id: XAI_SUBSCRIPTION_PROVIDER_ID,
@@ -230,6 +260,9 @@ export const isProviderUsableByFramework = (
   framework: { id: AgentFrameworkId; supportedApiTypes: readonly ModelProtocol[] }
 ): boolean => {
   if (isCodexSubscriptionProvider(provider.type)) return framework.id === 'codex'
+  // The Devin provider is a placeholder for Devin's own account session (`devin auth login`);
+  // no other framework can consume it, and Devin consumes no app provider transport.
+  if (isDevinProvider(provider.type)) return framework.id === 'devin'
   // Both Claude subscription modes rely on the ~/.claude or app-owned credential that only
   // claude-code knows how to read; OpenCode receives neither an endpoint nor a token.
   if (isClaudeSubscriptionProvider(provider.type) && framework.id !== 'claude-code') return false
@@ -276,6 +309,12 @@ export type OpencodeInfo = {
 }
 
 export type CodeBuddyInfo = {
+  resolvedPath?: string
+  version?: string
+}
+
+// Detected devin executable metadata (resolved path + reported version), persisted for the card.
+export type DevinInfo = {
   resolvedPath?: string
   version?: string
 }
@@ -586,6 +625,9 @@ export type SettingsSnapshot = {
   codebuddy: CodeBuddyInfo
   // Detected codex-acp adapter and its paired native Codex runtime.
   codex: CodexInfo
+  // Detected devin executable, for the framework-aware detection card.
+  // Older Main processes may omit it; consumers default to an empty record.
+  devin?: DevinInfo
   activeProviderId?: string
   // Last explicitly configured Claude subscription mode, used when another provider is active.
   claudeSubscriptionProviderId?: ClaudeSubscriptionProviderId
@@ -735,6 +777,8 @@ export type Preflight = {
   codexReady: boolean
   // Missing on older Main processes; Pi is selectable only when Main reports true.
   piReady?: boolean
+  // Missing on older Main processes; Devin is selectable only when Main reports true.
+  devinReady?: boolean
   // Location of the separately installed Pi ACP adapter, reported while a managed installation exists.
   piRuntimePath?: string
   // Readiness of the selected agent framework, plus which one it is.

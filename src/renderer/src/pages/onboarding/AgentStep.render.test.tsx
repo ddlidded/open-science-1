@@ -828,6 +828,7 @@ describe('AgentStep', () => {
       detectOpencode,
       detectCodex,
       detectCodeBuddy,
+      detectDevin: () => Promise.resolve(undefined),
       checkEnvironment,
       preflight: {
         claudeReady: false,
@@ -865,6 +866,7 @@ describe('AgentStep', () => {
       detectOpencode,
       detectCodex,
       detectCodeBuddy,
+      detectDevin: () => Promise.resolve(undefined),
       checkEnvironment,
       environmentCheck: environment(false)
     })
@@ -891,6 +893,7 @@ describe('AgentStep', () => {
       detectOpencode,
       detectCodex,
       detectCodeBuddy,
+      detectDevin: () => Promise.resolve(undefined),
       checkEnvironment,
       environmentCheck: environment(false)
     })
@@ -916,6 +919,7 @@ describe('AgentStep', () => {
       detectOpencode,
       detectCodex,
       detectCodeBuddy,
+      detectDevin: () => Promise.resolve(undefined),
       checkEnvironment,
       installClaude,
       environmentCheck: environment(false)
@@ -989,6 +993,12 @@ describe('AgentStep', () => {
           installError: undefined
         },
         pi: {
+          isInstalling: false,
+          installLogs: [],
+          installProgress: null,
+          installError: undefined
+        },
+        devin: {
           isInstalling: false,
           installLogs: [],
           installProgress: null,

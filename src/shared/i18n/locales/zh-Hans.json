@@ -7751,6 +7751,8 @@
     "Retrieved via {{source}}.": "已通过 {{source}} 获取文献信息。",
     "Edit reference details": "编辑文献信息",
     "Edit details": "编辑详情",
-    "Back to review": "返回核对"
+    "Back to review": "返回核对",
+    "Cognition's coding agent, connected through the Devin CLI's built-in ACP server.": "Cognition 的编码智能体，通过 Devin CLI 内置的 ACP 服务器连接。",
+    "Devin CLI is required for this framework. Install it separately (see <docs>devin.ai/cli</docs>), run Re-detect, then sign in with `devin auth login`.": "此框架需要 Devin CLI。请单独安装（参见 <docs>devin.ai/cli</docs>），运行“重新检测”，然后使用 `devin auth login` 登录。"
   }
 }

@@ -3,6 +3,7 @@ import { CirclePlus, Sparkles } from 'lucide-react'
 import {
   ClaudeColor,
   CodexMono,
+  DevinColor,
   NvidiaColor,
   OpenCodeMono,
   PiColor,
@@ -51,6 +52,7 @@ export const AgentFrameworkIcon = ({
     return <img src={codebuddyLogo} alt="" width={size} height={size} className={className} />
   }
   if (frameworkId === 'pi') return <PiColor size={size} className={className} />
+  if (frameworkId === 'devin') return <DevinColor size={size} className={className} />
   return <CodexMono size={size} className={cn('text-foreground', className)} />
 }
 

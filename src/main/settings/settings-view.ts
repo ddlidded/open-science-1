@@ -36,6 +36,7 @@ export const buildSettingsSnapshot = (
     claude: settings.claude ?? {},
     opencode: { resolvedPath: settings.opencodePath, version: settings.opencodeVersion },
     codebuddy: { resolvedPath: settings.codebuddyPath, version: settings.codebuddyVersion },
+    devin: { resolvedPath: settings.devinPath, version: settings.devinVersion },
     codex: {
       resolvedPath: settings.codex?.resolvedPath,
       version: settings.codex?.version,

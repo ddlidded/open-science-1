@@ -250,31 +250,45 @@ class AcpSessionUpdateProjector {
       routing.visible && routed.update.sessionUpdate === 'tool_call'
         ? this.assistantOutput.finishSession(routed.sessionId)
         : []
+    // Devin's ACP emits every small text fragment as its own agent_message_chunk with no
+    // messageId, so each would render as a separate message block. Pin the fragments of one
+    // turn to a stable id so they accumulate like every other framework's chunks.
+    const chunkEvent =
+      routing.framework === 'devin' &&
+      routed.update.sessionUpdate === 'agent_message_chunk' &&
+      originalEvent.kind === 'message' &&
+      originalEvent.role === 'assistant' &&
+      originalEvent.messageId === undefined
+        ? {
+            ...originalEvent,
+            messageId: `devin:${originalEvent.promptMessageId ?? routed.sessionId}`
+          }
+        : originalEvent
     let projectedEvent =
-      routing.framework === 'codebuddy' && originalEvent.kind === 'tool'
+      routing.framework === 'codebuddy' && chunkEvent.kind === 'tool'
         ? this.assistantOutput.projectToolEvent(
             routed.sessionId,
-            originalEvent,
+            chunkEvent,
             routed.update.sessionUpdate === 'tool_call'
           )
-        : originalEvent
+        : chunkEvent
     let assistantVisibleEvents: readonly AcpRuntimeEvent[] | undefined
     if (
       routing.visible &&
       (routing.framework === 'codebuddy' ||
         (routing.framework === 'opencode' && /(?:^|\/)minimax-/i.test(routing.model ?? ''))) &&
       routed.update.sessionUpdate === 'agent_message_chunk' &&
-      originalEvent.kind === 'message' &&
-      originalEvent.role === 'assistant' &&
-      typeof originalEvent.text === 'string'
+      chunkEvent.kind === 'message' &&
+      chunkEvent.role === 'assistant' &&
+      typeof chunkEvent.text === 'string'
     ) {
       assistantVisibleEvents = this.assistantOutput.projectAssistantChunk(
         routed.sessionId,
-        originalEvent,
+        chunkEvent,
         routing.framework === 'opencode'
       )
       projectedEvent = assistantVisibleEvents.at(-1) ?? {
-        ...originalEvent,
+        ...chunkEvent,
         text: '',
         raw: undefined
       }

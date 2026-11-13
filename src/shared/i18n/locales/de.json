@@ -7917,6 +7917,8 @@
     "Retrieved via {{source}}.": "Über {{source}} abgerufen.",
     "Edit reference details": "Bibliografische Angaben bearbeiten",
     "Edit details": "Details bearbeiten",
-    "Back to review": "Zurück zur Überprüfung"
+    "Back to review": "Zurück zur Überprüfung",
+    "Cognition's coding agent, connected through the Devin CLI's built-in ACP server.": "Cognitions Coding-Agent für das Terminal, verbunden über den integrierten ACP-Server der Devin CLI.",
+    "Devin CLI is required for this framework. Install it separately (see <docs>devin.ai/cli</docs>), run Re-detect, then sign in with `devin auth login`.": "Devin CLI wird für dieses Framework benötigt. Installiere es separat (siehe <docs>devin.ai/cli</docs>), führe „Neu erkennen“ aus und melde dich anschließend mit `devin auth login` an."
   }
 }

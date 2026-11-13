@@ -267,7 +267,8 @@ class HeadlessTaskApi {
       opencode: preflight.opencodeReady,
       codex: preflight.codexReady,
       codebuddy: preflight.codebuddyReady,
-      pi: preflight.piReady === true
+      pi: preflight.piReady === true,
+      devin: preflight.devinReady === true
     } as const
     const runtimeByFramework = {
       'claude-code': {
@@ -295,6 +296,12 @@ class HeadlessTaskApi {
         version: undefined,
         // Readiness alone does not say whether the runtime is app-managed or external.
         managed: undefined
+      },
+      devin: {
+        configured: Boolean(settings.devin?.resolvedPath),
+        version: settings.devin?.version,
+        // Devin is never app-managed; it is always an external CLI install.
+        managed: false
       }
     } as const
 

@@ -68,6 +68,7 @@ import {
   isSupportedCodeBuddyVersion,
   type CodeBuddyDetectDeps
 } from './codebuddy-detect'
+import { detectDevin, type DevinDetectDeps } from './devin-detect'
 import {
   detectCodex,
   detectCodexComponents,
@@ -265,6 +266,7 @@ type ConfiguredRuntimeProbe = {
   claudeVersion: string | null
   opencodeVersion: string | null
   codebuddyVersion: string | null
+  devinVersion: string | null
   codex: ConfiguredCodexRuntimeProbe
 }
 
@@ -284,6 +286,7 @@ const runtimeProbeFingerprint = (input: {
   claudePath?: string
   opencodePath?: string
   codebuddyPath?: string
+  devinPath?: string
   codexAdapterPath?: string
   codexNativePath?: string
 }): string =>
@@ -291,6 +294,7 @@ const runtimeProbeFingerprint = (input: {
     input.claudePath ?? null,
     input.opencodePath ?? null,
     input.codebuddyPath ?? null,
+    input.devinPath ?? null,
     input.codexAdapterPath ?? null,
     input.codexNativePath ?? null
   ])
@@ -300,6 +304,7 @@ const storedRuntimeProbeFingerprint = (settings: StoredSettings): string =>
     claudePath: settings.claude?.resolvedPath,
     opencodePath: settings.opencodePath,
     codebuddyPath: settings.codebuddyPath,
+    devinPath: settings.devinPath,
     codexAdapterPath: settings.codex?.resolvedPath,
     codexNativePath: settings.codex?.nativePath
   })
@@ -327,6 +332,7 @@ export type AgentRuntimeManagerOptions = {
   detectDeps?: ClaudeDetectDeps
   opencodeDetectDeps?: OpencodeDetectDeps
   codebuddyDetectDeps?: CodeBuddyDetectDeps
+  devinDetectDeps?: DevinDetectDeps
   codexDetectDeps?: CodexDetectDeps
   allocateOpenCodeUsagePort?: () => Promise<number>
   executeClaudeProbe?: ExecuteClaudeProbe
@@ -359,6 +365,7 @@ export class AgentRuntimeManager {
   private readonly detectDeps: ClaudeDetectDeps
   private readonly opencodeDetectDeps: OpencodeDetectDeps
   private readonly codebuddyDetectDeps: CodeBuddyDetectDeps
+  private readonly devinDetectDeps: DevinDetectDeps
   private readonly codexDetectDeps: CodexDetectDeps
   private readonly allocateOpenCodeUsagePort: () => Promise<number>
   private readonly executeClaudeProbe: ExecuteClaudeProbe
@@ -431,6 +438,9 @@ export class AgentRuntimeManager {
         managedCodeBuddyDir(this.configRoot)
       ]
     }
+    // Devin is never app-managed, so there is no managed install dir to add — PATH + the CLI's own
+    // well-known locations (already covered by collectCandidateDirs) are the whole search space.
+    this.devinDetectDeps = options.devinDetectDeps ?? createOpencodeDetectDeps()
 
     const managedAdapterPath = managedCodexAdapterEntry(this.configRoot)
     const managedNativePath = managedCodexBinary(this.configRoot)
@@ -530,6 +540,7 @@ export class AgentRuntimeManager {
         opencodePathExists: runtimeProbe.opencodeVersion !== null,
         codebuddyPathExists: isSupportedCodeBuddyVersion(runtimeProbe.codebuddyVersion),
         codexPathExists: codexVersionsFromProbe(runtimeProbe.codex) !== undefined,
+        devinPathExists: runtimeProbe.devinVersion !== null,
         piRuntimeReady: piReady,
         ...(existsSync(managedPiRoot(this.configRoot))
           ? { piRuntimePath: piAdapterPath({ configRoot: this.configRoot }) }
@@ -554,7 +565,7 @@ export class AgentRuntimeManager {
       signal.throwIfAborted()
       const agentFrameworkId = settings.agentFrameworkId ?? DEFAULT_AGENT_FRAMEWORK_ID
       const runtimeProbe = this.takeReusableRuntimeProbe('environmentCheckRuntimeProbe', settings)
-      const [claudeRuntime, opencodeRuntime, codebuddyRuntime, codexRuntime, piReady] =
+      const [claudeRuntime, opencodeRuntime, codebuddyRuntime, devinRuntime, codexRuntime, piReady] =
         await Promise.all([
           this.trackDetection(() =>
             this.resolveClaudeRuntime(settings, runtimeProbe?.claudeVersion, signal)
@@ -564,6 +575,9 @@ export class AgentRuntimeManager {
           ),
           this.trackDetection(() =>
             this.resolveCodeBuddyRuntime(settings, runtimeProbe?.codebuddyVersion, signal)
+          ),
+          this.trackDetection(() =>
+            this.resolveDevinRuntime(settings, runtimeProbe?.devinVersion, signal)
           ),
           this.trackDetection(() =>
             this.resolveCodexRuntime(settings, runtimeProbe?.codex, signal)
@@ -579,6 +593,7 @@ export class AgentRuntimeManager {
         claudeRuntime,
         opencodeRuntime,
         codebuddyRuntime,
+        devinRuntime,
         codexRuntime
       )
 
@@ -605,6 +620,11 @@ export class AgentRuntimeManager {
             id: 'codebuddy',
             label: getAgentFramework('codebuddy').displayName,
             runtime: codebuddyRuntime
+          },
+          {
+            id: 'devin',
+            label: getAgentFramework('devin').displayName,
+            runtime: devinRuntime
           },
           ...(agentFrameworkId === 'pi'
             ? [
@@ -697,6 +717,21 @@ export class AgentRuntimeManager {
       } else {
         const cached = (await this.repository.getSettings()).codebuddyPath
         if (cached) await this.repository.clearCodeBuddyInfo()
+      }
+    }, signal)
+  }
+
+  async detectDevin(signal?: AbortSignal): Promise<void> {
+    return this.trackDetection(async (operationSignal) => {
+      const detected = await detectDevin(this.devinDetectDeps, operationSignal)
+      operationSignal.throwIfAborted()
+      if (detected) {
+        await this.repository.setDevinInfo(detected.resolvedPath, detected.version)
+      } else {
+        const cached = (await this.repository.getSettings()).devinPath
+        if (cached && !(await this.pathExists(cached))) {
+          await this.repository.clearDevinInfo()
+        }
       }
     }, signal)
   }
@@ -1258,6 +1293,16 @@ export class AgentRuntimeManager {
     return detected.resolvedPath
   }
 
+  async resolveDevinExecutable(storedPath: string | undefined): Promise<string> {
+    if (storedPath && (await this.pathExists(storedPath))) return storedPath
+
+    const detected = await detectDevin(this.devinDetectDeps)
+    if (!detected) {
+      throw new Error('Devin executable not found. Install the Devin CLI or re-detect it in settings.')
+    }
+    return detected.resolvedPath
+  }
+
   async resolveCodexExecutable(
     storedPath: string | undefined,
     nativePath: string | undefined
@@ -1452,6 +1497,39 @@ export class AgentRuntimeManager {
       return { found: true, path: detected.resolvedPath, version: detected.version }
     }
     if (cachedPath) await this.repository.clearCodeBuddyInfo()
+    return { found: false }
+  }
+
+  private async resolveDevinRuntime(
+    settings: StoredSettings,
+    probedVersion: string | null | undefined,
+    signal: AbortSignal
+  ): Promise<ClaudeDetectResult> {
+    const cachedPath = settings.devinPath
+    if (cachedPath) {
+      const version =
+        probedVersion === undefined
+          ? await this.devinDetectDeps.getVersion(cachedPath, signal)
+          : (probedVersion ?? undefined)
+      signal.throwIfAborted()
+      if (version) {
+        if (version !== settings.devinVersion) {
+          await this.repository.setDevinInfo(cachedPath, version)
+        }
+        return { found: true, path: cachedPath, version }
+      }
+    }
+
+    const detected = await detectDevin(this.devinDetectDeps, signal)
+    signal.throwIfAborted()
+    if (detected) {
+      await this.repository.setDevinInfo(detected.resolvedPath, detected.version)
+      return { found: true, path: detected.resolvedPath, version: detected.version }
+    }
+    if (cachedPath && !(await this.pathExists(cachedPath))) {
+      signal.throwIfAborted()
+      await this.repository.clearDevinInfo()
+    }
     return { found: false }
   }
 
@@ -1668,29 +1746,36 @@ export class AgentRuntimeManager {
     settings: StoredSettings,
     signal: AbortSignal
   ): Promise<ConfiguredRuntimeProbe> {
-    const [claudeVersion, opencodeVersion, codebuddyVersion, codex] = await Promise.all([
-      settings.claude?.resolvedPath
-        ? this.trackDetection(() =>
-            this.detectDeps.getVersion(settings.claude!.resolvedPath!, signal)
-          )
-        : undefined,
-      settings.opencodePath
-        ? this.trackDetection(() =>
-            this.opencodeDetectDeps.getVersion(settings.opencodePath!, signal)
-          )
-        : undefined,
-      settings.codebuddyPath
-        ? this.trackDetection(() =>
-            this.codebuddyDetectDeps.getVersion(settings.codebuddyPath!, signal)
-          )
-        : undefined,
-      this.probeConfiguredCodexRuntime(settings.codex, signal)
-    ])
+    const [claudeVersion, opencodeVersion, codebuddyVersion, devinVersion, codex] =
+      await Promise.all([
+        settings.claude?.resolvedPath
+          ? this.trackDetection(() =>
+              this.detectDeps.getVersion(settings.claude!.resolvedPath!, signal)
+            )
+          : undefined,
+        settings.opencodePath
+          ? this.trackDetection(() =>
+              this.opencodeDetectDeps.getVersion(settings.opencodePath!, signal)
+            )
+          : undefined,
+        settings.codebuddyPath
+          ? this.trackDetection(() =>
+              this.codebuddyDetectDeps.getVersion(settings.codebuddyPath!, signal)
+            )
+          : undefined,
+        settings.devinPath
+          ? this.trackDetection(() =>
+              this.devinDetectDeps.getVersion(settings.devinPath!, signal)
+            )
+          : undefined,
+        this.probeConfiguredCodexRuntime(settings.codex, signal)
+      ])
     return {
       fingerprint: storedRuntimeProbeFingerprint(settings),
       claudeVersion: claudeVersion ?? null,
       opencodeVersion: opencodeVersion ?? null,
       codebuddyVersion: codebuddyVersion ?? null,
+      devinVersion: devinVersion ?? null,
       codex
     }
   }
@@ -1720,11 +1805,13 @@ export class AgentRuntimeManager {
     claudeRuntime: ClaudeDetectResult,
     opencodeRuntime: ClaudeDetectResult,
     codebuddyRuntime: ClaudeDetectResult,
+    devinRuntime: ClaudeDetectResult,
     codexRuntime: ClaudeDetectResult
   ): void {
     const claudePath = claudeRuntime.found ? claudeRuntime.path : settings.claude?.resolvedPath
     const opencodePath = opencodeRuntime.found ? opencodeRuntime.path : settings.opencodePath
     const codebuddyPath = codebuddyRuntime.found ? codebuddyRuntime.path : settings.codebuddyPath
+    const devinPath = devinRuntime.found ? devinRuntime.path : settings.devinPath
     const codexAdapterPath =
       codexRuntime.codexComponents?.adapterPath ??
       (codexRuntime.found ? codexRuntime.path : settings.codex?.resolvedPath)
@@ -1737,12 +1824,14 @@ export class AgentRuntimeManager {
         claudePath,
         opencodePath,
         codebuddyPath,
+        devinPath,
         codexAdapterPath,
         codexNativePath
       }),
       claudeVersion: claudeRuntime.found ? (claudeRuntime.version ?? null) : null,
       opencodeVersion: opencodeRuntime.found ? (opencodeRuntime.version ?? null) : null,
       codebuddyVersion: codebuddyRuntime.found ? (codebuddyRuntime.version ?? null) : null,
+      devinVersion: devinRuntime.found ? (devinRuntime.version ?? null) : null,
       codex: {
         ...(codexAdapterPath === controlledAdapterPath
           ? {

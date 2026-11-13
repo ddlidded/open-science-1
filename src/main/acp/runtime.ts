@@ -3124,7 +3124,9 @@ class AcpRuntime {
               ? backend.modelRoute === 'codex-bridge'
                 ? 'codex-bridge'
                 : 'codex-response'
-              : 'claude-code'
+              : backend.framework.id === 'devin'
+                ? 'devin'
+                : 'claude-code'
     return {
       target,
       ...(backend.context.window ? { contextWindow: backend.context.window } : {})

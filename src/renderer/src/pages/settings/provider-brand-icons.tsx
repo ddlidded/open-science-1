@@ -105,3 +105,21 @@ export const PiColor = (props: BrandIconProps): React.JSX.Element => (
     ))}
   </svg>
 )
+
+export const DevinColor = (props: BrandIconProps): React.JSX.Element => (
+  <svg {...iconProps(props)}>
+    <title>Devin</title>
+    <rect width="24" height="24" rx="5" fill="#5B5BD6" />
+    <text
+      x="12"
+      y="16.5"
+      textAnchor="middle"
+      fontSize="11"
+      fontWeight="700"
+      fill="#fff"
+      fontFamily="system-ui, sans-serif"
+    >
+      D
+    </text>
+  </svg>
+)

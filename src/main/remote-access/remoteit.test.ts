@@ -32,6 +32,7 @@ describe('Remote.It adapter', () => {
     }
     const run = vi.fn<RemoteItCommandRunner>(async (command) => {
       if (command === '/usr/local/bin/remoteit') throw permissionError
+      if (command === '/usr/bin/sudo') throw { stderr: 'sudo: a password is required' }
       return { stdout: '{"code":0}', stderr: '' }
     })
 
@@ -71,6 +72,7 @@ describe('Remote.It adapter', () => {
           stderr: ''
         }
       }
+      if (command === '/usr/bin/sudo') throw { stderr: 'sudo: a password is required' }
       return { stdout: '{"code":0}', stderr: '' }
     })
 
@@ -85,6 +87,41 @@ describe('Remote.It adapter', () => {
     expect(run.mock.calls.some(([command]) => command === '/usr/bin/osascript')).toBe(true)
   })
 
+  it('elevates privileged mutations through sudo when a sudoers rule allows it', async () => {
+    const permissionError = {
+      stdout: '{"code":7003,"message":"cmd - you must run this command with elevated privileges"}'
+    }
+    const run = vi.fn<RemoteItCommandRunner>(async (command) => {
+      if (command === '/usr/local/bin/remoteit') throw permissionError
+      return { stdout: '{"code":0}', stderr: '' }
+    })
+
+    await expect(
+      runRemoteItMutation(
+        '/usr/local/bin/remoteit',
+        ['service', 'modify', '--id', 'service-1', '--enable', 'true', '--json'],
+        run,
+        'darwin'
+      )
+    ).resolves.toEqual({ stdout: '{"code":0}', stderr: '' })
+    expect(run).toHaveBeenLastCalledWith(
+      '/usr/bin/sudo',
+      [
+        '-n',
+        '/usr/local/bin/remoteit',
+        'service',
+        'modify',
+        '--id',
+        'service-1',
+        '--enable',
+        'true',
+        '--json'
+      ],
+      { timeoutMs: 120_000 }
+    )
+    expect(run.mock.calls.some(([command]) => command === '/usr/bin/osascript')).toBe(false)
+  })
+
   it('prepares both service mutations through one native macOS administrator prompt', async () => {
     const permissionError = {
       stdout: '{"code":7003,"message":"cmd - you must run this command with elevated privileges"}'
@@ -92,6 +129,7 @@ describe('Remote.It adapter', () => {
     const marker = '__OPEN_SCIENCE_REMOTEIT_BATCH_COMMAND_END__'
     const run = vi.fn<RemoteItCommandRunner>(async (command) => {
       if (command === '/usr/local/bin/remoteit') throw permissionError
+      if (command === '/usr/bin/sudo') throw { stderr: 'sudo: a password is required' }
       return {
         stdout: `{"code":0,"data":{"serviceId":"app-service"}}\n${marker}\n{"code":0,"data":{"serviceId":"browser-service"}}\n${marker}\n`,
         stderr: ''
@@ -482,6 +520,7 @@ describe('Remote.It adapter', () => {
         return { stdout: status(added ? services : []), stderr: '' }
       }
       if (args[0] === 'version') return { stdout: '4.1.0\n', stderr: '' }
+      if (command === '/usr/bin/sudo') throw { stderr: 'sudo: a password is required' }
       if (command === '/usr/bin/osascript') {
         added = true
         return {

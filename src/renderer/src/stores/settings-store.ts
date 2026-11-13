@@ -34,6 +34,7 @@ import type {
   ClaudeInfo,
   ClaudeSubscriptionProviderId,
   CodeBuddyInfo,
+  DevinInfo,
   CodexInfo,
   OpencodeInfo,
   ProjectFilesFilterPreference,
@@ -124,6 +125,7 @@ type SettingsStoreData = RuntimeSetupState &
     opencode: OpencodeInfo
     codex: CodexInfo
     codebuddy: CodeBuddyInfo
+    devin: DevinInfo
     // Whether each framework's detected runtime is the app-managed install (only these can be uninstalled
     // in-app). Mirrored from the main-process snapshot; a PATH/npm binary reads false.
     claudeManaged: boolean
@@ -202,6 +204,7 @@ export const createInitialSettingsState = (): SettingsStoreData => ({
   opencode: {},
   codex: {},
   codebuddy: {},
+  devin: {},
   claudeManaged: false,
   opencodeManaged: false,
   codexManaged: false,
@@ -264,6 +267,7 @@ const applySnapshot = (snapshot: SettingsSnapshot): Partial<SettingsStoreData> =
   opencode: snapshot.opencode,
   codex: snapshot.codex ?? {},
   codebuddy: snapshot.codebuddy ?? {},
+  devin: snapshot.devin ?? {},
   claudeManaged: snapshot.claudeManaged,
   opencodeManaged: snapshot.opencodeManaged,
   codexManaged: snapshot.codexManaged ?? false,
@@ -463,6 +467,8 @@ const createSettingsStoreState = (
         await get().detectCodex()
       } else if (id === 'codebuddy') {
         await get().detectCodeBuddy()
+      } else if (id === 'devin') {
+        await get().detectDevin()
       } else if (id === 'claude-code') {
         await get().detectClaude()
       }

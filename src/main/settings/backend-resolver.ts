@@ -104,7 +104,10 @@ export type AgentBackendRuntimePort = Pick<
   | 'materializeAgentConfigFiles'
   | 'reserveOpenCodeUsagePort'
   | 'resolveCodexProxyEnvironment'
-> & { resolvePiExecutable?: () => Promise<string> }
+> & {
+    resolvePiExecutable?: () => Promise<string>
+    resolveDevinExecutable?: (storedPath?: string) => Promise<string>
+  }
 
 export type AgentBackendProviderPort = Pick<
   ProviderAccountsModule,
@@ -376,7 +379,9 @@ export class AgentBackendResolver {
             ? await this.runtime.resolveCodeBuddyExecutable(settings.codebuddyPath)
             : framework.id === 'pi'
               ? await this.runtime.resolvePiExecutable?.()
-              : await this.runtime.resolveOpencodeExecutable(settings.opencodePath)
+              : framework.id === 'devin'
+                ? await this.runtime.resolveDevinExecutable?.(settings.devinPath)
+                : await this.runtime.resolveOpencodeExecutable(settings.opencodePath)
     if (!executablePath) throw new Error('The selected agent executable is unavailable.')
     const codexNativeVersion =
       framework.id === 'codex'
