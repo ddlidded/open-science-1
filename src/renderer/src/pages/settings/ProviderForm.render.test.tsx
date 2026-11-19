@@ -228,7 +228,11 @@ describe('ProviderForm field switching', () => {
       expect(container.textContent).toContain(model)
     }
     expect(container.textContent).not.toContain('sensenova-u1')
-    expect(container.textContent).not.toContain('Refresh from vendor')
+    const refreshButton = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent?.trim() === 'Refresh model list'
+    )
+    expect(refreshButton).not.toBeNull()
+    expect(refreshButton?.disabled).toBe(true)
     expect(
       container.querySelector('a[href="https://platform.sensenova.cn/console/keys"]')?.textContent
     ).toBe('Get an API key')
@@ -245,6 +249,11 @@ describe('ProviderForm field switching', () => {
     expect(container.textContent).toContain('sensenova-6.8-flash-lite')
     expect(container.textContent).not.toContain('deepseek-v4-pro')
     expect(container.textContent).not.toContain('sensenova-6.7-flash-lite')
+    expect(
+      Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+        (button) => button.textContent?.trim() === 'Refresh model list'
+      )
+    ).toBeUndefined()
     expect(
       container.querySelector('a[href="https://platform.sensenova.ai/console/keys"]')?.textContent
     ).toBe('Get an API key')
@@ -435,7 +444,7 @@ describe('ProviderForm field switching', () => {
     expect(providerType?.textContent).toContain('Bailian for Plan')
     expect(icon?.getAttribute('src')).toMatch(/^data:image\/svg\+xml/)
     expect(decodeURIComponent(icon?.getAttribute('src') ?? '')).toContain('<title>BaiLian</title>')
-    expect(container.textContent).toContain('qwen3.8-max-preview')
+    expect(container.textContent).toContain('qwen4-max-preview')
   })
 
   it('allows a custom gateway to select the Responses endpoint', () => {

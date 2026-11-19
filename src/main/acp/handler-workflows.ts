@@ -108,6 +108,7 @@ const saveAsSkillReplayTargetForBackend = (
   if (backend.framework.id === 'codebuddy') return 'codebuddy'
   if (backend.framework.id === 'open-science-agent') return 'open-science-agent'
   if (backend.framework.id === 'pi') return 'pi'
+  if (backend.framework.id === 'devin') return 'devin'
   if (backend.framework.id === 'codex') {
     return backend.modelRoute === 'codex-bridge' ? 'codex-bridge' : 'codex-response'
   }

@@ -1,4 +1,5 @@
-import type { PackageResearchFilms } from './research-films-contract'
+import type { PackageResearchFilms, PackageOperationReplayFilms } from './research-films-contract'
+import type { ImageTask } from '../../shared/image-task'
 import { PackageHistory } from './history-schema'
 import { PackageLiterature } from './literature-contract'
 import type { PackagePdfNotes } from './pdf-notes-contract'
@@ -39,7 +40,9 @@ export type PackageRecords = {
   schemaVersion: 1
   tables: Record<NativeTable, NativeRow[]>
   logEvidence?: import('../artifacts/execution-evidence-log').PortableEvidence
+  imageTasks?: ImageTask[]
   researchFilms?: PackageResearchFilms
+  operationReplayFilms?: PackageOperationReplayFilms
   pdfNotes?: PackagePdfNotes
   literature?: PackageLiterature
   history?: PackageHistory

@@ -13,6 +13,7 @@ import {
   SESSION_DETAILS_TITLE_MAX_LENGTH,
   SessionDetailsConflictError,
   type EditSessionDetailsRequest,
+  type RenameSessionRequest,
   type PersistedChatSession,
   type PersistedSessionDetailsGeneration,
   type SessionDetailsAdmission
@@ -87,8 +88,10 @@ export interface SessionDetailsSafeLogger {
 
 export interface SessionDetailsOwner {
   start(startupSessions?: readonly SessionDetailsSession[]): Promise<void>
+  recoverSession(session: PersistedChatSession): Promise<void>
   afterSessionSaved(session: PersistedChatSession): void
   edit(request: EditSessionDetailsRequest): Promise<PersistedChatSession>
+  rename(request: RenameSessionRequest): Promise<PersistedChatSession>
   shutdown(): Promise<void>
 }
 
@@ -793,6 +796,129 @@ export const createSessionDetailsOwner = (
     }
   }
 
+  const edit = async (
+    request: EditSessionDetailsRequest | RenameSessionRequest
+  ): Promise<PersistedChatSession> => {
+    const key = keyOf(request.projectId, request.sessionId)
+    const currentAttempt = active.get(key)
+    const details = validateManualDetails(
+      request.title,
+      'description' in request ? request.description : ''
+    )
+    const expectedDetails =
+      request.expectedTitle === undefined ||
+      ('description' in request && request.expectedDescription === undefined)
+        ? undefined
+        : {
+            title: trimDisplayValue(request.expectedTitle),
+            description:
+              'description' in request ? trimDisplayValue(request.expectedDescription!) : undefined
+          }
+    // Web RPC v1 clients predate edit baselines and retain their original last-write-wins
+    // behavior. Current clients identify changed fields and fence only those fields.
+    const titleChanged = expectedDetails ? details.title !== expectedDetails.title : true
+    const descriptionChanged =
+      'description' in request &&
+      (expectedDetails ? details.description !== expectedDetails.description : true)
+    // Manual edits change only authority-owned display fields on the freshly loaded Session, so
+    // unrelated concurrent writes (conversation turns, runtime context) never fence them. The
+    // details' single other writer — generation — is superseded below instead.
+    const saved = await dependencies.sessions.mutateSession(
+      request.projectId,
+      request.sessionId,
+      (session) => {
+        if (
+          expectedDetails &&
+          ((titleChanged && trimDisplayValue(session.title) !== expectedDetails.title) ||
+            (descriptionChanged &&
+              trimDisplayValue(session.description ?? '') !== expectedDetails.description))
+        ) {
+          throw new SessionDetailsConflictError()
+        }
+        const edited = {
+          ...session,
+          ...(titleChanged ? { title: details.title } : {}),
+          ...(descriptionChanged ? { description: details.description } : {})
+        }
+        // Imported provenance is recorded research, not local editing authority.
+        if (session.packageOrigin) return { kind: 'write', session: edited }
+        const generation = session.sessionDetailsGeneration
+        const superseded =
+          generation?.status === 'queued' || generation?.status === 'running'
+            ? supersededGeneration(generation, now())
+            : generation
+        return {
+          kind: 'write',
+          session: {
+            ...edited,
+            sessionDetailsSource: 'manual',
+            ...(superseded ? { sessionDetailsGeneration: superseded } : {})
+          }
+        }
+      }
+    )
+    if (!saved) throw new Error('Session not found.')
+    if (currentAttempt) {
+      currentAttempt.controller.abort(MANUAL_EDIT_ABORT_REASON)
+    }
+    try {
+      dependencies.lifecycle.publish(saved)
+    } catch {
+      // Publication is derived state.
+    }
+    return saved
+  }
+
+  const recoverSession = async (session: SessionDetailsSession): Promise<void> => {
+    if (session.packageOrigin) return
+    if (!acceptCompletions || stopping || active.has(keyOf(session.projectId, session.id))) return
+    const generation = session.sessionDetailsGeneration
+    if (generation?.status === 'running') {
+      if (!hasValidGenerationAuthority(session)) {
+        await dependencies.sessions.mutateSession(session.projectId, session.id, (current) => {
+          if (!acceptCompletions || stopping || active.has(keyOf(session.projectId, session.id)))
+            return { kind: 'unchanged' }
+          return current.sessionDetailsGeneration && !hasValidGenerationAuthority(current)
+            ? { kind: 'write', session: withoutGenerationAuthority(current) }
+            : { kind: 'unchanged' }
+        })
+        return
+      }
+      const recovered = await dependencies.sessions.mutateSession(
+        session.projectId,
+        session.id,
+        (current) => {
+          if (!acceptCompletions || stopping || active.has(keyOf(session.projectId, session.id)))
+            return { kind: 'unchanged' }
+          const currentGeneration = current.sessionDetailsGeneration
+          if (
+            currentGeneration?.status !== 'running' ||
+            currentGeneration.requestId !== generation.requestId
+          ) {
+            return { kind: 'unchanged' }
+          }
+          return {
+            kind: 'write',
+            session: {
+              ...current,
+              sessionDetailsGeneration: {
+                ...currentGeneration,
+                status: 'failed',
+                completedAt: now(),
+                usageUnavailable: true
+              }
+            }
+          }
+        }
+      )
+      if (!acceptCompletions || stopping) return
+      publishTransition(recovered)
+      logCompletion(session.id, generation.requestId, 'failed', generation.startedAt, generation)
+    }
+    if (!acceptCompletions || stopping) return
+    await claimAndAdmit(session)
+  }
+
   return {
     async start(startupSessions?: readonly SessionDetailsSession[]): Promise<void> {
       if (started || stopping) return
@@ -801,66 +927,15 @@ export const createSessionDetailsOwner = (
       // Metadata generation in an imported package records the source's history.
       const catalog = startupSessions ?? (await dependencies.sessions.listSessions())
       const sessions = catalog.filter((session) => !session.packageOrigin)
-      for (const session of sessions) {
-        if (!acceptCompletions || stopping) return
-        const generation = session.sessionDetailsGeneration
-        if (generation?.status === 'running') {
-          if (!hasValidGenerationAuthority(session)) {
-            await dependencies.sessions.mutateSession(session.projectId, session.id, (current) => {
-              if (!acceptCompletions || stopping) return { kind: 'unchanged' }
-              return current.sessionDetailsGeneration && !hasValidGenerationAuthority(current)
-                ? { kind: 'write', session: withoutGenerationAuthority(current) }
-                : { kind: 'unchanged' }
-            })
-            continue
-          }
-          const recovered = await dependencies.sessions.mutateSession(
-            session.projectId,
-            session.id,
-            (current) => {
-              if (!acceptCompletions || stopping) return { kind: 'unchanged' }
-              const currentGeneration = current.sessionDetailsGeneration
-              if (
-                currentGeneration?.status !== 'running' ||
-                currentGeneration.requestId !== generation.requestId
-              ) {
-                return { kind: 'unchanged' }
-              }
-              return {
-                kind: 'write',
-                session: {
-                  ...current,
-                  sessionDetailsGeneration: {
-                    ...currentGeneration,
-                    status: 'failed',
-                    completedAt: now(),
-                    usageUnavailable: true
-                  }
-                }
-              }
-            }
-          )
-          if (!acceptCompletions || stopping) return
-          publishTransition(recovered)
-          logCompletion(
-            session.id,
-            generation.requestId,
-            'failed',
-            generation.startedAt,
-            generation
-          )
-        }
-      }
-      for (const session of sessions) {
-        if (!acceptCompletions || stopping) return
-        await claimAndAdmit(session)
-      }
+      for (const session of sessions) await recoverSession(session)
       if (!acceptCompletions || stopping) return
       started = true
       for (const session of pendingSaves.splice(0)) {
         void claimAndAdmit(session)
       }
     },
+
+    recoverSession,
 
     afterSessionSaved(session: PersistedChatSession): void {
       if (session.packageOrigin) return
@@ -884,72 +959,8 @@ export const createSessionDetailsOwner = (
       void claimAndAdmit(detailsSession)
     },
 
-    async edit(request: EditSessionDetailsRequest): Promise<PersistedChatSession> {
-      const key = keyOf(request.projectId, request.sessionId)
-      const currentAttempt = active.get(key)
-      const details = validateManualDetails(request.title, request.description)
-      const expectedDetails =
-        request.expectedTitle === undefined || request.expectedDescription === undefined
-          ? undefined
-          : {
-              title: trimDisplayValue(request.expectedTitle),
-              description: trimDisplayValue(request.expectedDescription)
-            }
-      // Web RPC v1 clients predate edit baselines and retain their original last-write-wins
-      // behavior. Current clients identify changed fields and fence only those fields.
-      const titleChanged = expectedDetails ? details.title !== expectedDetails.title : true
-      const descriptionChanged = expectedDetails
-        ? details.description !== expectedDetails.description
-        : true
-      // Manual edits change only authority-owned display fields on the freshly loaded Session, so
-      // unrelated concurrent writes (conversation turns, runtime context) never fence them. The
-      // details' single other writer — generation — is superseded below instead.
-      const saved = await dependencies.sessions.mutateSession(
-        request.projectId,
-        request.sessionId,
-        (session) => {
-          if (
-            expectedDetails &&
-            ((titleChanged && trimDisplayValue(session.title) !== expectedDetails.title) ||
-              (descriptionChanged &&
-                trimDisplayValue(session.description ?? '') !== expectedDetails.description))
-          ) {
-            throw new SessionDetailsConflictError()
-          }
-          const edited = {
-            ...session,
-            ...(titleChanged ? { title: details.title } : {}),
-            ...(descriptionChanged ? { description: details.description } : {})
-          }
-          // Imported generation provenance is recorded research, not local editing authority.
-          // The repository still rejects any research changes, including description edits.
-          if (session.packageOrigin) return { kind: 'write', session: edited }
-          const generation = session.sessionDetailsGeneration
-          const superseded =
-            generation?.status === 'queued' || generation?.status === 'running'
-              ? supersededGeneration(generation, now())
-              : generation
-          return {
-            kind: 'write',
-            session: {
-              ...edited,
-              sessionDetailsSource: 'manual',
-              ...(superseded ? { sessionDetailsGeneration: superseded } : {})
-            }
-          }
-        }
-      )
-      if (!saved) throw new Error('Session not found.')
-      if (currentAttempt) {
-        currentAttempt.controller.abort(MANUAL_EDIT_ABORT_REASON)
-      }
-      try {
-        dependencies.lifecycle.publish(saved)
-      } catch {
-        // Publication is derived state.
-      }
-      return saved
-    },
+    edit,
+    rename: edit,
 
     async shutdown(): Promise<void> {
       if (stopping) return

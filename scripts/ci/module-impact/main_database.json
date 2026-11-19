@@ -101,10 +101,17 @@
     "src/main/database/migrations/0053-literature-doi-identity.ts",
     "src/main/database/literature-doi-identity-migration.test.ts",
     "src/main/database/migrations/0054-slurm-job-reliability.ts",
-    "src/main/database/migrations/0055-session-discussion-parent.ts",
     "src/main/database/slurm-job-reliability-migration.test.ts",
+    "src/main/database/session-history-migration.test.ts",
+    "src/main/database/migrations/0055-session-discussion-parent.ts",
     "src/main/database/migrations/0056-compute-kubernetes-workspace.ts",
-    "src/main/database/migrations/0057-project-optimization-prompt.ts"
+    "src/main/database/migrations/0057-project-optimization-prompt.ts",
+    "src/main/database/migrated-database.test-support.ts",
+    "src/main/database/migrations/0058-session-schedules.ts",
+    "src/main/database/migrations/0059-session-history.ts",
+    "src/main/database/image-generation-usage.test.ts",
+    "src/main/database/migrations/0060-image-models.ts",
+    "src/main/database/image-task-provenance.test.ts"
   ],
   "interfacePaths": [
     "src/main/database/database-startup-ipc.ts",
@@ -113,7 +120,8 @@
     "src/main/database/migration-service.ts",
     "src/main/database/migration-sql-executor.ts",
     "src/main/database/migrations/0047-session-replay.ts",
-    "test/fixtures/application-database.ts"
+    "test/fixtures/application-database.ts",
+    "src/main/database/migrated-database.test-support.ts"
   ],
   "consumerModules": [],
   "testFiles": {
@@ -154,7 +162,10 @@
       "src/main/database/workspace-pdf-translation-migration.test.ts",
       "src/main/database/literature-personal-note-search-migration.test.ts",
       "src/main/database/literature-doi-identity-migration.test.ts",
-      "src/main/database/slurm-job-reliability-migration.test.ts"
+      "src/main/database/slurm-job-reliability-migration.test.ts",
+      "src/main/database/session-history-migration.test.ts",
+      "src/main/database/image-generation-usage.test.ts",
+      "src/main/database/image-task-provenance.test.ts"
     ],
     "contract": [
       "src/preload/index.test.ts",
@@ -543,7 +554,8 @@
       "src/main/desktop-native-electron.test.ts",
       "src/main/session-plan/session-plan-turn-outcome.test.ts",
       "src/renderer/src/pages/literature/literature-localization.render.test.tsx",
-      "src/main/web-service/session-payload.integration.test.ts"
+      "src/main/web-service/session-payload.integration.test.ts",
+      "src/main/literature/collector-identity.test.ts"
     ]
   },
   "capabilityOverlays": ["e2e_regressions", "e2e_delegation", "windows_sensitive"],

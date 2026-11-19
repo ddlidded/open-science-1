@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 
 import { ComputeJobLifecycle, dispatchMayHaveStarted } from './compute-job-lifecycle'
+import { isComputeJobTrackingStopped } from './compute-job-status'
 import {
   classifyConnectionFailure,
   ComputeConnectionError,
@@ -33,6 +34,7 @@ import { SubmittedJobRecovery, type SubmittedJobRecoveryResult } from './submitt
 
 // Polling interval: 15 seconds (design.md §8).
 export const POLL_INTERVAL_MS = 15_000
+export const POLL_FALLBACK_INTERVAL_MS = 60_000
 
 // Maximum bytes to capture per stream tail (64 KiB per design.md §8).
 const TAIL_MAX_BYTES = 65536
@@ -124,6 +126,7 @@ type VanishState = { ticks: number }
 // bounded by a concurrency semaphore of 2 and an in-flight dedup Set (design §3).
 export class JobPoller {
   private handle: ReturnType<typeof setInterval> | undefined
+  private fallbackHandle: ReturnType<typeof setInterval> | undefined
   private paused = false
   private workAbortController = new AbortController()
   private readonly activeTicks = new Set<Promise<void>>()
@@ -147,6 +150,8 @@ export class JobPoller {
   //   overlapping tick from re-emitting before notified_at is persisted (ticks are not serialized)
   private readonly inFlightErrorNotifs = new Set<string>()
   private integrityScanComplete = false
+  private passHadWork = false
+  private wakePending = false
 
   constructor(private readonly deps: JobPollerDeps) {
     this.setIntervalFn = deps.setInterval ?? ((fn, ms) => setInterval(fn, ms))
@@ -160,16 +165,16 @@ export class JobPoller {
     this.submittedJobRecovery = new SubmittedJobRecovery(this.lifecycle)
   }
 
-  // Poll once immediately for restart recovery, then on every interval.
+  // Poll once immediately for restart recovery, then keep a short cadence only while work exists.
   start(): void {
-    if (this.handle) return // already running
+    if (this.fallbackHandle) return // already running
 
     if (this.workAbortController.signal.aborted) {
       this.workAbortController = new AbortController()
     }
     this.paused = false
-    this.runTick() // first tick immediately (restart recovery)
-    this.handle = this.setIntervalFn(() => this.runTick(), POLL_INTERVAL_MS)
+    this.fallbackHandle = this.setIntervalFn(() => void this.wake(), POLL_FALLBACK_INTERVAL_MS)
+    void this.runTick() // first tick immediately (restart recovery)
   }
 
   async stop(): Promise<void> {
@@ -178,12 +183,21 @@ export class JobPoller {
       this.clearIntervalFn(this.handle)
       this.handle = undefined
     }
+    if (this.fallbackHandle) {
+      this.clearIntervalFn(this.fallbackHandle)
+      this.fallbackHandle = undefined
+    }
+    this.wakePending = false
     this.workAbortController.abort()
     await this.drainTrackedWork()
   }
 
   async pause(): Promise<void> {
     this.paused = true
+    if (this.handle) {
+      this.clearIntervalFn(this.handle)
+      this.handle = undefined
+    }
     await this.drainTrackedWork()
   }
 
@@ -197,17 +211,56 @@ export class JobPoller {
   resume(): void {
     if (!this.paused) return
     this.paused = false
-    if (this.handle) this.runTick()
+    if (this.fallbackHandle) void this.wake()
   }
 
-  private runTick(): void {
-    if (this.paused || this.activeTicks.size > 0) return
+  private scheduleActive(): void {
+    if (this.handle || this.paused || !this.fallbackHandle) return
+    this.handle = this.setIntervalFn(() => void this.runTick(), POLL_INTERVAL_MS)
+  }
+
+  private clearActive(): void {
+    if (!this.handle) return
+    this.clearIntervalFn(this.handle)
+    this.handle = undefined
+  }
+
+  private runTick(): Promise<void> {
+    if (this.paused) return Promise.resolve()
+    if (this.activeTicks.size > 0)
+      return this.activeTicks.values().next().value ?? Promise.resolve()
+    this.passHadWork = false
     const task = this.tick(this.workAbortController.signal)
     this.activeTicks.add(task)
     void task.then(
-      () => this.activeTicks.delete(task),
-      () => this.activeTicks.delete(task)
+      () => {
+        this.activeTicks.delete(task)
+        if (this.passHadWork) this.scheduleActive()
+        else this.clearActive()
+        if (this.wakePending && !this.paused) {
+          this.wakePending = false
+          void this.runTick()
+        }
+      },
+      () => {
+        this.activeTicks.delete(task)
+        this.scheduleActive()
+        if (this.wakePending && !this.paused) {
+          this.wakePending = false
+          void this.runTick()
+        }
+      }
     )
+    return task
+  }
+
+  wake(): Promise<void> {
+    if (this.paused) return Promise.resolve()
+    if (this.activeTicks.size > 0) {
+      this.wakePending = true
+      return this.activeTicks.values().next().value ?? Promise.resolve()
+    }
+    return this.runTick()
   }
 
   private trackBackground(task: Promise<void>): void {
@@ -222,6 +275,7 @@ export class JobPoller {
   // Also runs the restart-recovery harvest scan (design §3): re-queues terminal+unharvested jobs.
   async tick(signal: AbortSignal = this.workAbortController.signal): Promise<void> {
     if (signal.aborted) return
+    this.passHadWork = false
     if (
       !this.integrityScanComplete &&
       typeof this.deps.jobRepository.scanIntegrity === 'function'
@@ -240,6 +294,7 @@ export class JobPoller {
     if (this.harvestScheduler) {
       const unharvested = await this.deps.jobRepository.findTerminalUnharvested()
       if (signal.aborted) return
+      if (unharvested.length > 0) this.passHadWork = true
       for (const job of unharvested) {
         this.harvestScheduler.schedule(job, signal)
       }
@@ -253,6 +308,7 @@ export class JobPoller {
     if (this.deps.notifyJob) {
       const notificationReady = await this.deps.jobRepository.findNotificationReadyUnnotified()
       if (signal.aborted) return
+      if (notificationReady.length > 0) this.passHadWork = true
       for (const job of notificationReady) {
         // emitJobNotification guards on notified_at (idempotent), but that is a check-then-act
         // with a real window: ticks are not serialized, so a second tick could re-select this row
@@ -274,6 +330,11 @@ export class JobPoller {
 
     const jobs = await this.deps.jobRepository.findNonTerminal()
     if (signal.aborted) return
+    if (jobs.some((job) => job.status !== 'queued')) this.passHadWork = true
+    const activeJobIds = new Set(jobs.map((job) => job.job_id))
+    for (const jobId of this.vanishCounters.keys()) {
+      if (!activeJobIds.has(jobId)) this.vanishCounters.delete(jobId)
+    }
     if (jobs.length === 0) return
 
     // Group by provider.
@@ -305,7 +366,7 @@ export class JobPoller {
   ): Promise<void> {
     const slurmJobs = jobs.filter((job) => job.execution_mode === 'slurm')
     if (slurmJobs.length > 0) await this._pollSlurmProvider(providerId, slurmJobs, signal)
-    jobs = jobs.filter((job) => job.execution_mode !== 'slurm')
+    jobs = jobs.filter((job) => job.execution_mode !== 'slurm' && !isComputeJobTrackingStopped(job))
     if (jobs.length === 0) return
     const noHandle: ComputeJob[] = []
     const invalidHandle: ComputeJob[] = []
@@ -641,6 +702,14 @@ export class JobPoller {
     // The exact workdir was reachable but did not contain a valid launch receipt. Reuse the
     // deletion owner's fail-closed cleanup: it only signals a PID whose cwd proves ownership, then
     // removes the exact validated Job directory. Do not terminalize the row unless cleanup succeeds.
+    const cleanupJob = await this._getJobForRemoteAction(job.job_id, signal)
+    if (
+      !cleanupJob ||
+      cleanupJob.status !== job.status ||
+      cleanupJob.remote_handle !== job.remote_handle ||
+      cleanupJob.remote_workdir !== job.remote_workdir
+    )
+      return undefined
     let cleanupResult
     try {
       cleanupResult = await connection.run(cleanupCommand(workdir, undefined), {
@@ -902,9 +971,8 @@ export class JobPoller {
       if (elapsedSecs >= timeoutSecs + POLLER_KILL_GRACE_SECONDS) {
         // Same-job poll results are serialized. Re-read after acquiring that chain so an earlier
         // terminal result can suppress this stale destructive observation before any remote kill.
-        const current = await this.deps.jobRepository.get(job.job_id)
-        if (signal.aborted) return
-        if (!current || (current.status !== 'submitted' && current.status !== 'running')) return
+        const current = await this._getJobForRemoteAction(job.job_id, signal)
+        if (!current) return
 
         const handle = parseRemoteJobHandle(current.remote_handle, current.remote_workdir)
         if (!handle || handle.driver === 'slurm') {
@@ -919,6 +987,15 @@ export class JobPoller {
             handle.workdir,
             connection
           )
+          // Cancellation can settle while the ownership probe is in flight. Its failure stops
+          // tracking without changing status, so status alone cannot authorize a later signal.
+          const latest = await this._getJobForRemoteAction(job.job_id, signal)
+          if (
+            !latest ||
+            latest.remote_handle !== current.remote_handle ||
+            latest.remote_workdir !== current.remote_workdir
+          )
+            return
           if (ownership === 'unknown') {
             if (signal.aborted) return
             await this._recordTimeoutTerminationUnconfirmed(current)
@@ -963,6 +1040,23 @@ export class JobPoller {
       stdoutTail: stdoutTail || null,
       stderrTail: stderrTail || null
     })
+  }
+
+  private async _getJobForRemoteAction(
+    jobId: string,
+    signal: AbortSignal
+  ): Promise<ComputeJob | undefined> {
+    const current = await this.deps.jobRepository.get(jobId)
+    if (
+      signal.aborted ||
+      !current ||
+      (current.status !== 'submitted' && current.status !== 'running') ||
+      current.cancellation_status === 'cancelling' ||
+      current.cancellation_status === 'cancelled' ||
+      isComputeJobTrackingStopped(current)
+    )
+      return undefined
+    return current
   }
 
   private async _recordTimeoutTerminationUnconfirmed(job: ComputeJob): Promise<void> {

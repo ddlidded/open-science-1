@@ -1988,7 +1988,7 @@ describe('PR Gate workflow', () => {
     )
 
     expect(rustTest?.run).toBe(
-      'cargo test --locked --manifest-path packages/notebook-network-sandbox/vendor/windows-src/Cargo.toml'
+      'cargo test --locked --manifest-path packages/notebook-network-sandbox/vendor/windows-src/Cargo.toml -- --test-threads=1'
     )
     expect(build?.run).toBe('node packages/notebook-network-sandbox/vendor/windows/build.mjs x64')
     expect(steps.indexOf(rustTest!)).toBeLessThan(steps.indexOf(build!))
@@ -2156,8 +2156,11 @@ describe('PR Gate workflow', () => {
       ({ name }) => name === 'Install Linux sandbox dependency'
     )
     expect(linuxDependencies?.env?.DEBIAN_FRONTEND).toBe('noninteractive')
-    expect(linuxDependencies?.run).toContain('apt-get install --yes --no-install-recommends')
-    expect(linuxDependencies?.run).toContain('apparmor-profiles')
+    expect(linuxDependencies?.run).toContain('if ! command -v bwrap')
+    expect(linuxDependencies?.run).toContain('! command -v apparmor_parser')
+    expect(linuxDependencies?.run).toContain(
+      'apt-get install --reinstall --yes --no-install-recommends apparmor bubblewrap'
+    )
     expect(linuxDependencies?.run).toContain('bwrap-userns-restrict')
     expect(linuxDependencies?.run).toContain('scripts/ci/bwrap-userns-restrict')
     expect(linuxDependencies?.run).toContain('bwrap --unshare-all')

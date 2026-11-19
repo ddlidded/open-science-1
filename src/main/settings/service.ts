@@ -1,3 +1,4 @@
+import type { CodeBuddyAccountRequest } from '../../shared/codebuddy-subscription'
 import { ProviderAcpValidator } from './provider-acp-validation'
 import { SkillSourceRepository } from '../skills/source-repository'
 import type {
@@ -5,7 +6,6 @@ import type {
   AddSkillSourceRequest,
   RemoveSkillSourceRequest
 } from '../../shared/skill-sources'
-import type { SetSemanticScholarCredentialRequest } from '../../shared/settings'
 import { SkillReleaseInstallConflict as MarketplaceInstallConflict } from '@aipoch/skills'
 import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -148,7 +148,7 @@ import type {
   ValidateProviderResult,
   VisionModelConfiguration as VisionModel
 } from '../../shared/settings'
-import { isCodexSubscriptionProvider } from '../../shared/settings'
+import { isCodexSubscriptionProvider } from '../../shared/settings-runtime'
 import type { CloseActionPreference } from '../../shared/window-controls'
 import type {
   InstallMissingWslDependenciesRequest,
@@ -642,6 +642,7 @@ class SettingsService {
       userClaudeDir: this.userClaudeDir,
       userCodexDir,
       allocateSettingsIdSequence,
+      resolveCodeBuddyExecutable: (path) => this.runtimeManager.resolveCodeBuddyExecutable(path),
       resolveCodexExecutable: async (adapterPath, nativePath, prepareForHarness) => {
         if (
           prepareForHarness ||
@@ -661,6 +662,7 @@ class SettingsService {
     })
     const providerHealth = new ProviderRuntimeHealthOwner(
       this.repository,
+      this.providers,
       options.onProviderHealthChanged
     )
     this.harnessSessions = new HarnessSessionOwner(
@@ -707,6 +709,8 @@ class SettingsService {
     const operation = startDiagnosticOperation(this.log, { operation: 'settings-load' })
     try {
       operation.phase('read-authority')
+      // Publish the durable one-time network migration before any renderer takes its baseline.
+      await this.notebookNetwork.get()
       const stored = await this.repository.getSettings()
       operation.phase('migrate-legacy-key-refs')
       const settings = await this.migrateLegacyKeyRefs(stored)
@@ -1118,6 +1122,10 @@ class SettingsService {
 
   async admitVisionModel(): ReturnType<ScenarioModelOwner['vision']['admit']> {
     return this.scenarioModels.vision.admit()
+  }
+
+  get imageModels(): Pick<ScenarioModelOwner['image'], 'snapshot' | 'mutate' | 'resolve' | 'test'> {
+    return this.scenarioModels.image
   }
 
   async admitReviewerExecutionModel(): ReturnType<ScenarioModelOwner['reviewer']['admit']> {
@@ -1570,8 +1578,8 @@ class SettingsService {
     return this.skills.importAgentHomeSkills(request)
   }
   // Computes the startup gates from a fresh or immediate startup-chain runtime probe.
-  async getPreflight(): Promise<ReadinessPreflight> {
-    return this.runtimeManager.getPreflight(this.providers)
+  async getPreflight(signal?: AbortSignal): Promise<ReadinessPreflight> {
+    return this.runtimeManager.getPreflight(this.providers, signal)
   }
 
   async bootstrap(
@@ -1808,6 +1816,10 @@ class SettingsService {
     this.providers.cancelClaudeLogin()
   }
 
+  async codeBuddyAccount(request: CodeBuddyAccountRequest): Promise<ValidateProviderResult> {
+    return this.providers.codeBuddyAccount(request)
+  }
+
   async loginIsolatedCodex(): Promise<ValidateProviderResult> {
     return this.providers.loginIsolatedCodex()
   }
@@ -1980,12 +1992,6 @@ class SettingsService {
   // Sets or clears the shared contact email and NCBI API key (encrypted at rest), returning state.
   async setNcbiCredentials(request: SetNcbiCredentialsRequest): Promise<ConnectorsSnapshot> {
     return this.connectors.setNcbiCredentials(request)
-  }
-
-  async setSemanticScholarCredential(
-    request: SetSemanticScholarCredentialRequest
-  ): Promise<ConnectorsSnapshot> {
-    return this.connectors.setSemanticScholarCredential(request)
   }
 
   async setOpenAlexCredential(request: SetOpenAlexCredentialRequest): Promise<ConnectorsSnapshot> {

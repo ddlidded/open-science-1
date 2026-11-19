@@ -15,6 +15,11 @@ const OfficePreviewRenderer = lazy(() =>
     default: OfficePreviewRenderer
   }))
 )
+const PptxAnnotatedPreviewRenderer = lazy(() =>
+  import('./renderers/PptxAnnotatedPreview').then(({ PptxAnnotatedPreviewRenderer }) => ({
+    default: PptxAnnotatedPreviewRenderer
+  }))
+)
 const PdfPreviewRenderer = lazy(() =>
   import('./renderers/PdfPreview').then(({ PdfPreviewRenderer }) => ({
     default: PdfPreviewRenderer
@@ -44,6 +49,8 @@ const NotebookFilePreview = lazy(() =>
 // Keeps the registry as the single routing point while avoiding dynamic component creation in render.
 export const renderPreviewFile = ({
   item,
+  onPinImageSource,
+  onImageEditorVersionChange,
   presentation,
   readOnly,
   annotationVersionId,
@@ -88,7 +95,13 @@ export const renderPreviewFile = ({
     case 'html':
       return <HtmlPreviewRenderer {...props} />
     case 'image':
-      return <ImagePreviewRenderer {...props} />
+      return (
+        <ImagePreviewRenderer
+          {...props}
+          onPinImageSource={onPinImageSource}
+          onImageEditorVersionChange={onImageEditorVersionChange}
+        />
+      )
     case 'json':
       return <PlanJsonPreview item={item} readOnly={readOnly} />
     case 'markdown':
@@ -112,9 +125,10 @@ export const renderPreviewFile = ({
           onPdfTranslationChange={onPdfTranslationChange}
         />
       )
+    case 'presentation':
+      return <PptxAnnotatedPreviewRenderer {...props} />
     case 'word':
     case 'spreadsheet':
-    case 'presentation':
       return <OfficePreviewRenderer item={item} />
     case 'unknown':
       return undefined

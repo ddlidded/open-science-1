@@ -11,7 +11,7 @@ import type { AcpPermissionRequest } from '../../shared/acp-permission-contract'
 import { isCurrentInFlight } from '../../shared/in-flight-promise'
 import { sessionAgentConfigurationSchema } from '../../shared/session-configuration'
 import type { PersistedSideChat } from '../../shared/session-persistence'
-import { isCodexSubscriptionProviderId } from '../../shared/settings'
+import { isCodexSubscriptionProviderId } from '../../shared/settings-runtime'
 import {
   SIDE_CHAT_MESSAGE_LIMIT,
   type SideChatModelSelection,
@@ -247,6 +247,7 @@ const prepareSideChatBackend = (
   profileRoot: string
 ): Promise<ResolvedAgentBackend> =>
   prepareRestrictedBackend(backend, profileRoot, {
+    allowCodeBuddySubscription: true,
     agentName: SIDE_CHAT_AGENT_NAME,
     description: 'Restricted Side chat with one relationship-bound message tool.',
     systemPrompt: SIDE_CHAT_SYSTEM_PROMPT,
@@ -891,9 +892,11 @@ class SideChatRuntimeOwner {
         .filter((chat) => chat.parentSessionId === parentSessionId)
         .map((chat) => chat.sideChat.id)
     ])
-    await Promise.all(
+    const results = await Promise.allSettled(
       [...ids].map((id) => (this.pendingCloses.has(id) ? this.finishClose(id) : this.closeById(id)))
     )
+    const failed = results.find((result) => result.status === 'rejected')
+    if (failed) throw failed.reason
   }
 
   private async closeById(sideSessionId: string): Promise<void> {
@@ -946,7 +949,7 @@ class SideChatRuntimeOwner {
     for (const parentSessionId of parentSessionIdsToInvalidate) {
       this.invalidatedParents.add(parentSessionId)
     }
-    await Promise.all(
+    const results = await Promise.allSettled(
       parentSessionIdsToInvalidate.map(async (parentSessionId) => {
         try {
           await this.closeActiveForParent(parentSessionId)
@@ -955,6 +958,8 @@ class SideChatRuntimeOwner {
         }
       })
     )
+    const failed = results.find((result) => result.status === 'rejected')
+    if (failed) throw failed.reason
   }
 
   async invalidateProject(projectId: string): Promise<void> {

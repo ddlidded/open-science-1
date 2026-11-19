@@ -70,6 +70,7 @@ let root: Root
 const originalSettingsActions = (() => {
   const state = useSettingsStore.getState()
   return {
+    refreshProviderModels: state.refreshProviderModels,
     persistProvider: state.persistProvider,
     saveValidatedProvider: state.saveValidatedProvider,
     validateProvider: state.validateProvider,
@@ -582,6 +583,39 @@ describe('SettingsPage layout', () => {
       })
     )
     expect(document.body.textContent).not.toContain(copy)
+  })
+
+  it('opens image services from the scenario row and uses shared breadcrumbs for its editor', async () => {
+    window.api.settings.getImageModels = vi
+      .fn()
+      .mockResolvedValue({ services: [], availableProviders: [] })
+    useSettingsStore.getState().openSettingsToPanel('model')
+    await act(async () => root.render(<SettingsPage open onClose={vi.fn()} />))
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[data-scenario-model="image-generation"]')!.click()
+    )
+    const clickText = async (text: string): Promise<void> => {
+      const button = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+        (button) => button.textContent?.trim() === text
+      )
+      expect(button).toBeDefined()
+      await act(async () => button!.click())
+    }
+    await clickText('Image services')
+    expect(document.querySelector('[aria-label="Back to model"]')).not.toBeNull()
+    expect(document.body.textContent).toContain('No model services added')
+    await clickText('Add image service')
+    expect(document.querySelector('#image-service-name')).not.toBeNull()
+    expect(document.body.textContent).toContain('Add image service')
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[aria-label="Back to model"]')!.click()
+    )
+    expect(document.querySelector('#image-service-name')).toBeNull()
+    expect(document.body.textContent).toContain('No model services added')
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[aria-label="Back to model"]')!.click()
+    )
+    expect(document.querySelector('[data-scenario-model="image-generation"]')).not.toBeNull()
   })
 
   it('retains model tab DOM across model routes and navigation Back', async () => {
@@ -2023,9 +2057,75 @@ describe('SettingsPage layout', () => {
     expect(useSettingsStore.getState().providers[0]?.region).toBe('global')
   })
 
-  it('shows an error when refreshing a provider model catalog rejects', async () => {
+  it('scopes catalog history to the current key and workspace and retries a settings read independently', async () => {
+    const catalog = { fetchedAt: 123, models: [{ id: 'workspace-only' }] }
+    const provider: ProviderView = {
+      id: 'account',
+      name: 'Anthropic',
+      type: 'official',
+      vendorId: 'anthropic',
+      models: ['workspace-only'],
+      hasKey: true,
+      needsKey: false,
+      supportsImageInput: false,
+      catalogParameters: { workspaceId: 'first' },
+      modelCatalog: catalog,
+      modelCatalogStatus: { attemptedAt: 124, ok: false, code: 'timeout' }
+    }
+    useSettingsStore.getState().openSettingsToPanel('model')
+    await act(async () => root.render(<SettingsPage open onClose={vi.fn()} />))
+    const saved = { fetchedAt: 125, models: [{ id: 'new-saved-model' }] }
+    const refresh = vi.fn().mockResolvedValue({
+      ok: true,
+      category: 'ok',
+      catalog: saved,
+      catalogStatus: { attemptedAt: 125, ok: true },
+      refreshFailed: true
+    })
+    await act(async () =>
+      useSettingsStore.setState({ providers: [provider], refreshProviderModels: refresh })
+    )
+    await act(async () =>
+      document.body.querySelector<HTMLButtonElement>('[aria-label="Edit"]')!.click()
+    )
+    const button = (name: string): HTMLButtonElement =>
+      Array.from(document.body.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === name
+      )!
+    for (const [id, next, original] of [
+      ['catalog-workspaceId', 'second', 'first'],
+      ['provider-key', 'new-key', '']
+    ]) {
+      expect(document.body.textContent).toContain('Last updated:')
+      expect(document.body.textContent).toContain('Model refresh failed.')
+      const input = document.getElementById(id)!
+      act(() => fireEvent.change(input, { target: { value: next } }))
+      expect(document.body.textContent).not.toContain('workspace-only')
+      expect(document.body.textContent).not.toContain('Last updated:')
+      expect(document.body.textContent).not.toContain('Model refresh failed.')
+      expect(button('Refresh model list').disabled).toBe(false)
+      act(() => fireEvent.change(input, { target: { value: original } }))
+    }
+    await act(async () => button('Refresh model list').click())
+    expect(document.body.textContent).toContain('Model list saved.')
+    expect(document.body.textContent).toContain('new-saved-model')
+    expect(document.body.textContent).not.toContain('Model refresh failed.')
+    const read = vi.mocked(window.api.settings.getSettings)
+    read.mockResolvedValueOnce({
+      ...(await read()),
+      providers: [
+        { ...provider, modelCatalog: saved, modelCatalogStatus: { attemptedAt: 125, ok: true } }
+      ]
+    })
+    await act(async () => button('Retry').click())
+    expect(document.body.textContent).not.toContain('Model list saved.')
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a local catalog write failure distinct from a vendor network failure', async () => {
     const provider: ProviderView = {
       id: 'anthropic-provider',
+      configRevision: 4,
       type: 'official',
       vendorId: 'anthropic',
       name: 'Anthropic',
@@ -2037,7 +2137,7 @@ describe('SettingsPage layout', () => {
       supportsImageInput: true
     }
     useSettingsStore.setState({ providers: [provider], activeProviderId: provider.id })
-    const refreshProviderModels = vi.fn().mockRejectedValue(new Error('transport failed'))
+    const refreshProviderModels = vi.fn().mockRejectedValue(new Error('settings.json write failed'))
     useSettingsStore.setState({ refreshProviderModels: refreshProviderModels as never })
 
     useSettingsStore.getState().openSettingsToPanel('model')
@@ -2049,14 +2149,18 @@ describe('SettingsPage layout', () => {
       document.body.querySelector<HTMLButtonElement>('[aria-label="Edit"]')?.click()
     )
     const refresh = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find(
-      (button) => button.textContent?.trim() === 'Refresh from vendor'
+      (button) => button.textContent?.trim() === 'Refresh model list'
     )
     await act(async () => refresh?.click())
 
-    expect(refreshProviderModels).toHaveBeenCalledWith(provider.id)
-    expect(document.body.querySelector('[role="alert"]')?.textContent).toBe(
-      'Could not refresh models from the vendor.'
-    )
+    expect(refreshProviderModels).toHaveBeenCalledWith({
+      providerId: provider.id,
+      expectedConfigRevision: 4
+    })
+    const alertText = document.body.querySelector('[role="alert"]')?.textContent ?? ''
+    expect(alertText).toContain('Model refresh failed. The previous list is kept.')
+    expect(alertText).toContain('Something went wrong. Try again.')
+    expect(alertText).not.toContain('Check your network')
   })
 
   it('opens Usage as a standalone history-driven settings panel', async () => {
@@ -3737,7 +3841,7 @@ describe('SettingsPage layout', () => {
     )
   })
 
-  it('opens Notebook network access from the Runtimes protection banner', async () => {
+  it('opens Notebook network access from the Runtimes network summary', async () => {
     useRuntimeSettingsStore.setState({
       envs: { python: [], r: [] },
       loaded: true,
@@ -3756,11 +3860,12 @@ describe('SettingsPage layout', () => {
     })
 
     const banner = document.body.querySelector('[data-testid="notebook-network-protection-banner"]')
-    expect(banner?.textContent).toContain('Network protection on')
+    expect(banner?.querySelector('h3')?.textContent).toBe('Notebook network access')
 
     const manage = Array.from(banner?.querySelectorAll<HTMLButtonElement>('button') ?? []).find(
-      (button) => button.textContent?.trim() === 'Network settings'
+      (button) => button.textContent?.trim() === 'Manage access'
     )
+    expect(manage).toBeDefined()
     await act(async () => {
       manage?.click()
     })
@@ -5155,6 +5260,30 @@ describe('Provider editor leave protection', () => {
     fireEvent.change(field('Provider name'), { target: { value: 'Research endpoint draft' } })
   }
 
+  it('refreshes a switched provider with only its own key and catalog parameters', async () => {
+    await mountEditor(true)
+    selectSettingsOption('Provider type', 'Anthropic')
+    act(() => {
+      fireEvent.change(field('API key'), { target: { value: 'first-provider-key' } })
+      fireEvent.change(document.getElementById('catalog-workspaceId')!, {
+        target: { value: 'first-workspace' }
+      })
+    })
+    selectSettingsOption('Provider type', 'OpenAI')
+    expect(field('API key').value).toBe('')
+    const refresh = vi.fn().mockResolvedValue({ ok: true, category: 'ok' })
+    useSettingsStore.setState({ refreshProviderModels: refresh })
+    act(() => fireEvent.change(field('API key'), { target: { value: 'second-provider-key' } }))
+    await clickLabel('Refresh model list')
+    expect(refresh).toHaveBeenCalledWith({
+      draft: expect.objectContaining({
+        vendorId: 'openai',
+        key: 'second-provider-key',
+        catalogParameters: undefined
+      })
+    })
+  })
+
   it('locks the new provider type through a pending save and allows retry after failure', async () => {
     let reject!: (error: Error) => void
     const saveValidatedProvider = vi
@@ -5189,6 +5318,8 @@ describe('Provider editor leave protection', () => {
     expect(document.body.textContent).toContain('Write failed')
     selectSettingsOption('Provider type', 'OpenAI')
     selectSettingsOption('Provider type', 'Anthropic')
+    expect(field('API key').value).toBe('')
+    act(() => fireEvent.change(field('API key'), { target: { value: 'new-provider-key' } }))
     await clickLabel('Save')
     expect(saveValidatedProvider).toHaveBeenCalledTimes(2)
     expect(field('Provider type')).toBeNull()
@@ -5589,26 +5720,20 @@ describe('Settings Compute completion navigation', () => {
 })
 
 describe('Network editor leave protection', () => {
-  it.each(['keep editing', 'discard before success', 'discard before failure'])(
-    'handles closing Settings during a pending network rule review: %s',
-    async (choice) => {
-      const rule = {
-        hostname: 'lab.internal.example',
-        port: 8443,
-        protocol: 'http' as const,
-        approvedAddresses: []
-      }
-      let resolve!: (value: { ok: true; destination: typeof rule }) => void
-      let reject!: (reason: Error) => void
-      window.api.settings.reviewNotebookPrivateDestination = vi.fn(
+  it.each(['success', 'failure'])(
+    'protects closing Settings during a pending network rule save: %s',
+    async (outcome) => {
+      const onClose = vi.fn()
+      const saved = useSettingsStore.getState().notebookNetwork
+      let finish!: (value: typeof saved) => void
+      let fail!: (reason: Error) => void
+      const save = vi.fn<(next: typeof saved) => Promise<typeof saved>>(
         () =>
-          new Promise<{ ok: true; destination: typeof rule }>((done, fail) => {
-            resolve = done
-            reject = fail
+          new Promise<typeof saved>((resolve, reject) => {
+            finish = resolve
+            fail = reject
           })
       )
-      const onClose = vi.fn()
-      const save = vi.fn()
       useSettingsStore.setState({
         pendingSettingsIntent: {
           requestId: 44,
@@ -5624,63 +5749,42 @@ describe('Network editor leave protection', () => {
         })
       }
       await act(async () => root.render(<SettingsPage open onClose={onClose} />))
-      await click('Add service')
-      act(() => {
-        fireEvent.change(document.querySelector('#private-hostname')!, {
-          target: { value: rule.hostname }
+      await click('Add address')
+      act(() =>
+        fireEvent.change(document.querySelector('form input')!, {
+          target: { value: 'lab.internal.example' }
         })
-        fireEvent.change(document.querySelector('#private-port')!, { target: { value: '8443' } })
-      })
-      await click('Review service')
+      )
+      await click('Confirm')
+      expect(save).toHaveBeenCalledOnce()
       await act(async () =>
         document.querySelector<HTMLButtonElement>('[aria-label="Close settings"]')!.click()
       )
       expect(document.body.textContent).toContain('Your network rules have not been saved.')
-      expect(onClose).not.toHaveBeenCalled()
-      const discard = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
-        (item) => item.textContent?.trim() === 'Discard changes'
+      const pending = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
+        (item) => item.textContent?.trim() === 'Please wait…'
       )!
-      expect(discard.disabled).toBe(false)
-
-      if (choice === 'keep editing') {
-        await click('Keep editing')
-        expect(document.querySelector<HTMLInputElement>('#private-hostname')!.value).toBe(
-          rule.hostname
-        )
-        expect(document.querySelector<HTMLInputElement>('#private-port')!.value).toBe('8443')
+      expect(pending.disabled).toBe(true)
+      await act(async () => pending.click())
+      expect(onClose).not.toHaveBeenCalled()
+      await act(async () => {
+        if (outcome === 'success') finish(save.mock.calls[0]![0] ?? saved)
+        else fail(new Error('Save failed'))
+      })
+      if (outcome === 'success') {
         expect(document.body.textContent).not.toContain('Your network rules have not been saved.')
-        await act(async () => resolve({ ok: true, destination: rule }))
-        expect(document.body.textContent).toContain('HTTP://lab.internal.example:8443')
-        expect(document.body.textContent).toContain('Add network exception')
-        expect(onClose).not.toHaveBeenCalled()
+        expect(document.querySelector('form')).toBeNull()
       } else {
-        await click('Discard changes')
-        expect(onClose).toHaveBeenCalledOnce()
-        // Apply the controlled open prop as the application does after accepting onClose.
-        await act(async () => root.render(<SettingsPage open={false} onClose={onClose} />))
-        expect(document.querySelector('#private-hostname')).toBeNull()
-        await act(async () => root.render(<SettingsPage open onClose={onClose} />))
-        await click('Add service')
-        act(() =>
-          fireEvent.change(document.querySelector('#private-hostname')!, {
-            target: { value: 'new.internal.example' }
-          })
+        expect(document.body.textContent).toContain('Your network rules have not been saved.')
+        await click('Keep editing')
+        expect(document.querySelector<HTMLInputElement>('form input')!.value).toBe(
+          'lab.internal.example'
         )
-        await act(async () => {
-          if (choice === 'discard before failure') reject(new Error('DNS failed after closing'))
-          else resolve({ ok: true, destination: rule })
-        })
-        expect(document.querySelector<HTMLInputElement>('#private-hostname')!.value).toBe(
-          'new.internal.example'
+        expect(document.body.textContent).toContain(
+          'Could not save network rules. Reopen this page and try again.'
         )
-        expect(document.body.textContent).not.toContain('10.32.0.7')
-        expect(document.body.textContent).not.toContain('Add network exception')
-        expect(document.body.textContent).not.toContain('Could not review the service. Try again.')
       }
-      expect(save).not.toHaveBeenCalled()
-      expect(useSettingsStore.getState().notebookNetwork.trustedPrivateDestinations ?? []).toEqual(
-        []
-      )
+      expect(onClose).not.toHaveBeenCalled()
     }
   )
   it.each(['breadcrumb', 'panel', 'Close settings'])(
@@ -5697,10 +5801,10 @@ describe('Network editor leave protection', () => {
       await act(async () => root.render(<SettingsPage open onClose={onClose} />))
       await act(async () => {
         ;[...document.body.querySelectorAll<HTMLButtonElement>('button')]
-          .find((button) => button.textContent?.trim() === 'Add service')!
+          .find((button) => button.textContent?.trim() === 'Add address')!
           .click()
       })
-      const input = document.body.querySelector<HTMLInputElement>('#private-hostname')!
+      const input = document.body.querySelector<HTMLInputElement>('form input')!
       expect(input).not.toBeNull()
       act(() => fireEvent.change(input, { target: { value: 'unsaved.example' } }))
       const leave = async (): Promise<void> => {
@@ -5729,7 +5833,7 @@ describe('Network editor leave protection', () => {
       await leave()
       await click('Discard changes')
       if (route === 'Close settings') expect(onClose).toHaveBeenCalledOnce()
-      else expect(document.body.querySelector('#private-hostname')).toBeNull()
+      else expect(document.body.querySelector('form input')).toBeNull()
     }
   )
 })
@@ -5754,7 +5858,17 @@ it('dismisses a network leave request when the pending save succeeds', async () 
   )
   await act(async () =>
     [...document.body.querySelectorAll<HTMLButtonElement>('button')]
-      .find((b) => b.textContent?.trim() === 'Save changes')!
+      .find((b) => b.textContent?.trim() === 'Add address')!
+      .click()
+  )
+  act(() =>
+    fireEvent.change(document.querySelector('form input')!, {
+      target: { value: 'saved.local' }
+    })
+  )
+  await act(async () =>
+    [...document.body.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.trim() === 'Confirm')!
       .click()
   )
   await act(async () =>

@@ -1,3 +1,14 @@
+import {
+  scheduleToolPresentation,
+  scheduleToolResult
+} from './schedules/schedule-tool-presentation'
+import type { ImageErrorDetail } from '../../../../shared/image-model-error'
+import {
+  imageToolOperation,
+  readImageToolResult,
+  readImageToolError,
+  type ImageToolResult
+} from './image-tool-presentation'
 import type { ContentBlock, ToolCallContent, ToolKind } from '@agentclientprotocol/sdk'
 
 import { formatByteSize } from '@/lib/utils'
@@ -71,7 +82,12 @@ type ToolLiteratureSection = {
   summary: LiteratureToolSummary
 }
 
-type ToolSummarySection = { kind: 'summary'; summary: ToolSummary; file?: boolean }
+type ToolSummarySection = {
+  kind: 'summary'
+  summary: ToolSummary
+  file?: boolean
+  schedule?: boolean
+}
 type ToolDetailSection =
   | ToolCodeSection
   | ToolDiffSection
@@ -80,6 +96,7 @@ type ToolDetailSection =
   | { kind: 'authorized-directories'; snapshot: AuthorizedDirectorySnapshot }
 
 type ToolActivityDetails = {
+  image?: { operation: 'generate' | 'edit'; result?: ImageToolResult; error?: ImageErrorDetail }
   codeReview?: NotebookCodeReview
   defaultExpanded?: boolean
   displayName: string
@@ -1357,6 +1374,44 @@ const buildToolActivityDetails = (
       sections: snapshot
         ? [{ kind: 'authorized-directories', snapshot }]
         : (buildGenericDetails(activity)?.sections ?? [])
+    }
+  }
+  const schedule =
+    scheduleToolPresentation(activity.providerToolName, activity.rawInput, t) ??
+    scheduleToolPresentation(activity.title, activity.rawInput, t)
+  if (schedule) {
+    const summary = scheduleToolResult(
+      schedule.summary,
+      activity.rawOutput ?? getOutputText(activity)?.code,
+      activity.status === 'failed',
+      t
+    )
+    const sections: ToolDetailSection[] = [{ kind: 'summary', summary, schedule: true }]
+    if (schedule.script) {
+      const script = createCodeSection('Script', schedule.script.code, schedule.script.language)
+      if (script) sections.push({ ...script, collapsible: true })
+    }
+    return { displayName: summary.title, subtitle: summary.subtitle, sections }
+  }
+  const imageOperation = imageToolOperation(activity.providerToolName, activity.title)
+  if (imageOperation) {
+    const result =
+      activity.status === 'completed'
+        ? [activity.rawOutput, ...(activity.toolContent ?? [])]
+            .map((value) => readImageToolResult(value))
+            .find(Boolean)
+        : undefined
+    const error = [activity.rawOutput, ...(activity.toolContent ?? [])]
+      .map((value) => readImageToolError(value))
+      .find(Boolean)
+    return {
+      displayName: imageOperation === 'edit' ? t('Edit image') : t('Image generation'),
+      defaultExpanded: true,
+      image: { operation: imageOperation, result, error },
+      sections:
+        activity.status === 'failed' && !error
+          ? [createCodeSection('Error', getOutputText(activity)?.code ?? t('Failed'))!]
+          : []
     }
   }
   const literatureDetails = buildLiteratureDetails(activity)

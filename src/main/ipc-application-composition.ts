@@ -1,6 +1,16 @@
+import { composeImageTasks } from './composition/image-tasks'
 import { RestrictedInferenceRunner } from './acp/restricted-inference-runner'
 import { PromptOptimizationService } from './projects/prompt-optimization'
+import { ScheduleRunSessions } from './schedules/run-session'
+import { ScheduleMcp } from './schedules/mcp'
+import { ScheduleManagement } from './schedules/management'
+import { ScheduleRepository } from './schedules/repository'
+import { ScheduleDispatcher } from './schedules/dispatcher'
+import { createScheduleExecution } from './schedules/execution'
+import { getProjectDbClient as getScheduleDatabase } from './projects/prisma-client'
+import { resolveConfigRoot as scheduleConfigRoot } from './storage-root'
 import { composeResearchFilm } from './composition/research-film'
+import { composeImageModel } from './composition/image-model'
 import { createLocalModelApi } from './local-models/owner'
 import { registerLocalModelIpcHandlers } from './desktop-surface-declarations'
 import { type DiagnosticOperation } from '@aipoch/diagnostics/node'
@@ -30,6 +40,7 @@ import { composeDesktopUtilities } from './composition/desktop-utilities'
 import { composeDocumentReading } from './composition/document-reading'
 import { composeHandoff, composeStorageHandoff } from './composition/handoff'
 import { composeManagedFiles } from './composition/managed-files'
+import { toPptxDraftChangedEvent } from './pptx-edit/draft-summary'
 import { composeNotebookBridge } from './composition/notebook-bridge'
 import { composeNotebookRuntime } from './composition/notebook-runtime'
 import { composeNotebookSurfaces } from './composition/notebook-surfaces'
@@ -175,7 +186,9 @@ export type ApplicationRuntimeInterfaces = {
   detectActiveSessions: () => ReturnType<typeof detectActiveSessions>
   listTrayNavigationSessions: () => Promise<readonly TrayNavigationSession[]>
   prepareDesktopUpdate: import('./update/strategy').InstallGate
-  inspectDesktopUpdate: () => Promise<import('./update/strategy').InstallReadiness>
+  inspectDesktopUpdate: (
+    signal?: AbortSignal
+  ) => Promise<import('./update/strategy').InstallReadiness>
   abortDesktopUpdate: () => void
   hasActivePackageTransfer: () => boolean
   hasActiveReviewerWork: () => boolean
@@ -293,6 +306,12 @@ export const createApplicationModules = async (
     runtimeRef,
     modules
   })
+  const imageModel = await composeImageModel({
+    managedFileVersionService: uploadStorage.managedFileVersionService,
+    ...settingsBootstrap,
+    ...sessionFoundation,
+    modules
+  })
   const sessionPackages = await composeSessionPackages({
     ...settingsBootstrap,
     ...storageStartup,
@@ -300,6 +319,7 @@ export const createApplicationModules = async (
     ...sessionFoundation,
     getDetectSessionExportBlockingSessions: () =>
       projectLifecycle.detectSessionExportBlockingSessions,
+    readImageTasks: (scope) => imageTasks.list(scope, true),
     modules
   })
   const managedFiles = composeManagedFiles({
@@ -307,9 +327,14 @@ export const createApplicationModules = async (
     managedFileVersionService: uploadStorage.managedFileVersionService,
     ...sessionFoundation,
     getNotebookInputRegistry: () => sessionAuthority.notebookInputRegistry,
+    captureImageGenerationPreviewScope: (request) =>
+      notebookBridge.notebookRpcServer.captureImageGenerationPreviewScope(request),
     // Catalog access begins after composition, sharing the application's sole Literature owner.
     readLiteratureItems: (itemIds) => researchCatalog.literatureCatalog.getMany(itemIds)
   })
+  managedFiles.pptxDrafts.subscribe((event) =>
+    applicationEvents.publish('pptx-draft:changed', toPptxDraftChangedEvent(event))
+  )
   const sessionAuthority = await composeSessionAuthority({
     uploadRepository: uploadStorage.uploadRepository,
     managedFileVersionService: uploadStorage.managedFileVersionService,
@@ -352,7 +377,16 @@ export const createApplicationModules = async (
     resolveTarget: settingsBootstrap.resolveSessionAgentTarget,
     runner: optimizationRunner
   })
+  const imageTasks = await composeImageTasks({
+    imageModel,
+    managedFiles,
+    sessionAuthority,
+    sessionRepository: sessionFoundation.sessionRepository,
+    modules
+  })
   const researchFilm = await composeResearchFilm({
+    translate,
+    previewResources: managedFiles.previewResources,
     ...settingsBootstrap,
     ...sessionFoundation,
     ...sessionAuthority,
@@ -367,8 +401,11 @@ export const createApplicationModules = async (
     researchFilm.videoExportModels
   )
   declareElectronAdapter('local-models', () => registerLocalModelIpcHandlers(localModels))
+  const scheduleRepository = new ScheduleRepository(() => getScheduleDatabase(scheduleConfigRoot()))
   const projectLifecycle = composeProjectLifecycle({
+    imageTasks,
     promptOptimization,
+    scheduleRepository,
     applicationEvents,
     ...storageStartup,
     uploadRepository: uploadStorage.uploadRepository,
@@ -520,6 +557,7 @@ export const createApplicationModules = async (
     ...computeAdmission,
     ...agentControls,
     ...delegation,
+    imageModel,
     modules,
     composition
   })
@@ -545,7 +583,19 @@ export const createApplicationModules = async (
     sessionAuthority,
     translate
   })
+  let wakeSchedules = (): void => {}
+  const publishScheduleChange = (projectId: string, sessionId: string | null): void => {
+    applicationEvents.publish('schedules:changed', { projectId, sessionId })
+    wakeSchedules()
+  }
+  const schedules = new ScheduleManagement(
+    scheduleRepository,
+    sessionAuthority.sessionPersistenceCoordinator,
+    projectLifecycle.archiveCoordinator,
+    publishScheduleChange
+  )
   const agentRuntime = await composeAgentRuntime({
+    schedules: new ScheduleMcp(schedules),
     sandboxNetworkApprovalOwner: sessionProjection.sandboxNetworkApprovalOwner,
     ...settingsBootstrap,
     ...storageStartup,
@@ -629,7 +679,8 @@ export const createApplicationModules = async (
   })
   const handoff = await composeHandoff({
     holdUpdateAdmission: () => applicationCommandComposition.holdUpdateAdmission(),
-    loadSessionSummaries: () => sessionFoundation.sessionRepository.loadSessionSummaries(),
+    loadSessionSummaries: (signal) =>
+      sessionFoundation.sessionRepository.loadSessionSummaries(signal),
     declareElectronAdapter,
     webSessionPersistenceFlush,
     ...settingsBootstrap,
@@ -807,6 +858,8 @@ export const createApplicationModules = async (
   })
   sessionAuthority.reviewerCommandOwnerRef.current = reviewerCommandOwner
   const commandDependencies = composeCommandDependencies({
+    schedules,
+    imageTasks,
     localeOwner,
     reportUploadProgress,
     sideChatCommands,
@@ -865,12 +918,57 @@ export const createApplicationModules = async (
     dispose: () => owner.dispose(),
     disposeTimeoutMs: QUIT_SHUTDOWN_BUDGET_MS
   }))
+  // Deferred catalog cleanup starts after foreground commands are ready. Session Details recovery
+  // is triggered by the Session load path when the user opens a Session.
+  await modules.add(sessionProjection, (projection) => {
+    const recovery = projection.createDeferredRecovery(async () => undefined)
+    return {
+      name: 'deferred-session-recovery',
+      capability: recovery,
+      start: () => recovery.start(),
+      dispose: () => recovery.dispose(),
+      disposeTimeoutMs: QUIT_SHUTDOWN_BUDGET_MS
+    }
+  })
+  const scheduleDispatcher = await modules.add(undefined, () => {
+    const owner = new ScheduleDispatcher(
+      () => getScheduleDatabase(scheduleConfigRoot()),
+      createScheduleExecution({
+        runSessions: new ScheduleRunSessions(
+          sessionAuthority.sessionPersistenceCoordinator,
+          projectLifecycle.archiveCoordinator,
+          (id) => sessionPackages.projectRepository.get(id),
+          () => settingsBootstrap.settingsService.getSettingsView()
+        ),
+        sessions: sessionAuthority.sessionPersistenceCoordinator,
+        runtime: agentRuntime.runtime,
+        notebook: notebookRuntime.notebookService,
+        archive: projectLifecycle.archiveCoordinator,
+        resolveAgentTarget: settingsBootstrap.resolveSessionAgentTarget
+      }),
+      publishScheduleChange
+    )
+    wakeSchedules = () => owner.wake()
+    owner.start()
+    return {
+      name: 'session-schedules',
+      capability: owner,
+      dispose: () => owner.dispose(QUIT_SHUTDOWN_BUDGET_MS),
+      disposeTimeoutMs: QUIT_SHUTDOWN_BUDGET_MS
+    }
+  })
   composition.phase('commands')
   const quitPreparation = createQuitPreparation({
     quiesceAuthentication: () => settingsBootstrap.settingsService.quiesceAuthentication(),
-    prepareAgent: () => agentRuntime.runtime.prepareForQuit(),
+    prepareAgent: () => {
+      scheduleDispatcher.suspend()
+      return agentRuntime.runtime.prepareForQuit()
+    },
     prepareBackends: () => handoff.shutdownCoordinator.runForQuitPreparation(),
-    abortAgent: () => agentRuntime.runtime.abortQuitPreparation(),
+    abortAgent: () => {
+      agentRuntime.runtime.abortQuitPreparation()
+      scheduleDispatcher.start()
+    },
     resumeSideChat: () => sideChat.sideChatRuntime.resumeAfterHandoff()
   })
 

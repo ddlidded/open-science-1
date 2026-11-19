@@ -36,7 +36,7 @@ import type {
   LiteratureLibraryScope,
   LiteratureLibrarySearchResult
 } from '../literature/library-mcp-server'
-import type { LiteratureReadDocumentRequest } from '../literature/mcp-server'
+import type { LiteratureReadDocumentRequest } from '../literature/mcp-contract'
 import type { NotebookRpcConnection } from '../notebook/mcp-server'
 import type { NotebookHandoffContext } from '../notebook/session-read-model'
 import type { PermissionGrantRegistry } from '../permission-grants/registry'
@@ -79,6 +79,7 @@ export type AcpRuntimeCallbacks = {
 }
 
 export type AcpRuntimeOptions = {
+  schedules?: import('../schedules/mcp').ScheduleMcp
   prepareSessionReading?: PrepareSessionReading
   classifySkills?: import('../../shared/classification').ClassifySkills
   classifyReadingRoute?: import('../../shared/classification').ClassifyReadingRoute
@@ -90,6 +91,8 @@ export type AcpRuntimeOptions = {
   callbacks?: AcpRuntimeCallbacks
   // Restricted inference classifies operational notices; ordinary chat keeps its presentation.
   separateProviderNotices?: boolean
+  // Restricted inference can recover a provider's truncated response from its turn observations.
+  recoverOutputTruncation?: boolean
   auxiliaryUsage?: Readonly<{
     projectIdForSession: (sessionId: string) => Promise<string | undefined>
     record: (
@@ -181,6 +184,9 @@ export type AcpRuntimeOptions = {
       promptMessageId: string
       input: LiteratureReadDocumentRequest
     }) => Promise<unknown>
+  }>
+  pptx?: Readonly<{
+    agent: import('../pptx-edit/agent-handler').PptxAgentHandler
   }>
   literatureLibrary?: Readonly<{
     acquirePdf?: (request: {
@@ -324,6 +330,10 @@ export type AcpRuntimeArtifactOptions = {
   projectId: string
   mcpEntryPath: string
   mcpCommand?: string
+  enableImageGeneration?: boolean
+  imageMcp?: {
+    getPresetId: () => Promise<string | undefined>
+  }
   repository?: ArtifactRepository
   runRegistry?: ArtifactRunRegistry
   getRpcConnection?: () => Promise<NotebookRpcConnection>

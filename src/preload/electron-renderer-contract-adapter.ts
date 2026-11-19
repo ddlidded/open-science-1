@@ -167,6 +167,9 @@ export const createElectronRendererContractAdapter = (
       if (
         error instanceof ApplicationCommandError &&
         (publicPath === 'settings.getSettings' ||
+          publicPath === 'sessions.rename' ||
+          publicPath === 'sessions.setPinned' ||
+          (publicPath.startsWith('schedules.') && error.code.startsWith('schedule-')) ||
           (publicPath === 'literature.citationStyles' && error.code.startsWith('csl-')))
       ) {
         // contextBridge strips custom Error properties; plain rejections retain reviewed domain diagnostics.

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -10,6 +10,7 @@ import { materializeSessionConversationGraph } from '../../shared/session-persis
 import { initDataRoot } from '../storage-root'
 import { SessionPersistenceCoordinator, type SessionFileIndex } from './coordinator'
 import { loadSessionMutationAuthority, SessionRepository } from './repository'
+import { SessionJournalStore, sessionJournalPath } from './journal'
 import {
   RuntimeSessionOwner,
   TERMINAL_ADMISSION_WAIT_BUDGET_MS,
@@ -19,8 +20,12 @@ import {
 } from './runtime-session-owner'
 
 const roots: string[] = []
+const physicalMutations: Promise<unknown>[] = []
 
 afterEach(async () => {
+  // Admission timeout and terminal acknowledgement may settle before the physical mutation.
+  // Drain those real coordinator operations before removing the authority they still own.
+  while (physicalMutations.length) await Promise.allSettled(physicalMutations.splice(0))
   vi.useRealTimers()
   vi.restoreAllMocks()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
@@ -93,8 +98,11 @@ const harness = async () => {
   const owner = new RuntimeSessionOwner({
     loadSession: (identity) =>
       coordinator.loadSessionForContinuation(identity.projectId, identity.sessionId),
-    mutateSession: (identity, mutate, onJsonCommitted) =>
-      coordinator.mutateRuntimeSession(identity, mutate, onJsonCommitted),
+    mutateSession: (identity, mutate, onJsonCommitted) => {
+      const pending = coordinator.mutateRuntimeSession(identity, mutate, onJsonCommitted)
+      physicalMutations.push(pending)
+      return pending
+    },
     finalizeArtifacts: async () => [],
     onTerminalCommitExhausted: (_scope, event, retry, waitForWriteRelease) =>
       coordinator.recordRuntimeTerminalFailure(event, retry, waitForWriteRelease),
@@ -153,10 +161,11 @@ describe('terminal recovery through the real Session persistence scheduler', () 
     const terminal = h.owner.commitTerminal(h.event, publish)
     try {
       await entered.promise
-      const file = join(h.root, 'sessions', h.scope.projectId, `${h.scope.sessionId}.json`)
-      expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({
-        session: { status: 'idle' }
-      })
+      const file = sessionJournalPath(
+        join(h.root, 'sessions', h.scope.projectId, `${h.scope.sessionId}.json`)
+      )
+      const current = await new SessionJournalStore({ maxBytes: 8 * 1024 * 1024 }).read(file)
+      expect(current?.document).toMatchObject({ session: { status: 'idle' } })
       await terminal
       expect(publish).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: h.event.id }))
       expect(h.coordinator.listRuntimeTerminalFailures()).toHaveLength(0)
@@ -228,6 +237,9 @@ describe('terminal recovery through the real Session persistence scheduler', () 
       expect(await followUp).toMatchObject({
         status: outcome === 'release' ? 'admitted' : 'rejected'
       })
+      // A timed-out wait leaves its admission queued. Drain it while the fake deadline is still
+      // expired, before reading durable state or restoring real time during fixture cleanup.
+      await h.coordinator.loadAll()
       const latest = await h.read()
       if (latest.status !== 'found') throw new Error('Expected durable Session authority.')
       expect(latest.session.runtimeSessionAdmissions).toHaveLength(outcome === 'release' ? 2 : 1)

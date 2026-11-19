@@ -448,6 +448,7 @@ describe('LiteratureLibraryPage', () => {
             issue: 'not-generated' as const
           })),
           related: vi.fn(),
+          cancelRelated: vi.fn().mockResolvedValue(undefined),
           publicationCheck: vi.fn(
             async (request: { itemId: string; expectedMetadataRevision: number }) => ({
               itemId: request.itemId,
@@ -756,6 +757,39 @@ describe('LiteratureLibraryPage', () => {
       expect(overview.getAttribute('aria-busy')).toBe('false')
     }
   )
+
+  it('expands only the active citation graph inside the real detail dialog and restores the list owner', async () => {
+    search.mockImplementation((request: { scope: string }) =>
+      Promise.resolve(request.scope === 'library' ? { entries: [libraryItem] } : { entries: [] })
+    )
+    render(<LiteratureLibraryPage />)
+    vi.mocked(window.api.literature.related).mockImplementation(async (request) => ({
+      itemId: request.itemId,
+      metadataRevision: request.expectedMetadataRevision,
+      direction: request.direction,
+      provider: 'europe-pmc',
+      state: 'ready',
+      records: [],
+      seed: { paperId: 'europe-pmc:MED:12345678', item: libraryItem.item },
+      resolutionToken: '00000000-0000-4000-8000-000000000000'
+    }))
+    fireEvent.click(screen.getByRole('button', { name: 'All references' }))
+    const detail = await openReferenceDetail(await screen.findByText(libraryItem.item.title))
+    fireEvent.click(within(detail).getByRole('button', { name: 'References' }))
+    await within(detail).findByRole('button', { name: 'Citation graph' })
+    expect(detail.querySelector('[data-citation-graph-active]')).toBeNull()
+    expect(detail.className).toContain('w-[min(760px,calc(100vw-2rem))]')
+    expect(detail.className).toContain(
+      'has-[[data-citation-graph-active]]:w-[min(1440px,calc(100vw-2rem))]'
+    )
+    fireEvent.click(within(detail).getByRole('button', { name: 'Citation graph' }))
+    await within(detail).findByRole('group', { name: 'Citation graph' })
+    expect(detail.querySelector('[data-citation-graph-active]')).not.toBeNull()
+    fireEvent.click(within(detail).getByRole('button', { name: 'List' }))
+    expect(detail.querySelector('[data-citation-graph-active]')).toBeNull()
+    expect(within(detail).queryByRole('group', { name: 'Citation graph' })).toBeNull()
+    expect(within(detail).getByRole('tab', { name: 'References' })).toBeTruthy()
+  })
 
   it('keeps batch details in a dialog and generation in the selection menu', async () => {
     const records = Array.from({ length: 5 }, (_, index) => createLibraryItem(index))
@@ -10381,7 +10415,7 @@ describe('LiteratureLibraryPage', () => {
       await screen.findByText('Reference 0')
     })
 
-    it('resizes pages and clears the previous page selection', async () => {
+    it('clears selection when resizing and reuses filtered results when paging back', async () => {
       fireEvent.click(screen.getByLabelText('References per page'))
       fireEvent.click(screen.getByRole('option', { name: '50' }))
 
@@ -10424,9 +10458,7 @@ describe('LiteratureLibraryPage', () => {
       await waitFor(() => expect(screen.getAllByLabelText(/^Select Reference /)).toHaveLength(25))
       expect(screen.queryByText(/ selected$/)).toBeNull()
       expect(screen.getByText('1–25')).not.toBeNull()
-    })
 
-    it('pages ordered results, selects only the current page and reuses cached pages', async () => {
       fireEvent.click(screen.getByLabelText('Select all references'))
       expect(screen.getByText('25 selected')).not.toBeNull()
       fireEvent.click(
@@ -10495,7 +10527,7 @@ describe('LiteratureLibraryPage', () => {
       expect(await screen.findByText('Alphabetical result')).not.toBeNull()
       expect(screen.queryByRole('button', { name: 'Page 2' })).toBeNull()
       expect(screen.queryByText('Reference 25')).toBeNull()
-    })
+    }, 30_000)
   })
 
   it('starts a page request and shows its loading state in the pagination click', async () => {

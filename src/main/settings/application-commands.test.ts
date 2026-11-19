@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { parseSettingsSnapshot } from '../../shared/settings'
+import { parseSettingsSnapshot } from '../../shared/settings-runtime'
 import { RENDERER_CONTRACT_GROUPS } from '../../shared/renderer-contract-catalog'
 import {
   createApplicationCommandRouter,
@@ -51,6 +51,9 @@ const expectedChannels = [
   'settings:detect-opencode',
   'settings:get-connector-detail',
   'settings:get-classification',
+  'settings:test-image-model',
+  'settings:get-image-models',
+  'settings:update-image-models',
   'settings:get-github-token-status',
   'settings:get-package-mirror',
   'settings:review-notebook-private-destination',
@@ -571,6 +574,20 @@ describe('Settings core application commands', () => {
       [settingsCoreApplicationCommands.installClaude, [{ source: 'managed' }]],
       [settingsCoreApplicationCommands.installCodex, [{ source: 'managed' }]],
       [settingsCoreApplicationCommands.installOpencode, [{ source: 'managed' }]],
+      [
+        settingsCoreApplicationCommands.testImageModel,
+        [
+          {
+            kind: 'save',
+            id: '11111111-1111-4111-8111-111111111111',
+            name: 'Images',
+            adapter: 'openai-images',
+            models: []
+          } satisfies import('../../shared/image-model-settings').ImageModelTestRequest
+        ]
+      ],
+      [settingsCoreApplicationCommands.getImageModels, []],
+      [settingsCoreApplicationCommands.updateImageModels, [{ kind: 'bind' }]],
       [settingsCoreApplicationCommands.getGitHubTokenStatus, []],
       [settingsCoreApplicationCommands.saveGitHubToken, [{ token: 'github_pat_test' }]],
       [settingsCoreApplicationCommands.removeGitHubToken, []],

@@ -1,3 +1,4 @@
+import { createModuleTestPlan } from './module-test-impact.mjs'
 import { readFileSync, readdirSync } from 'node:fs'
 import { builtinModules } from 'node:module'
 import { relative, resolve, sep } from 'node:path'
@@ -294,6 +295,16 @@ it.each([
 })
 
 const hostBoundaryManifest = loadModuleImpactManifest()
+const hostPlans = new Map<string, ReturnType<typeof createModuleTestPlan>>()
+function hostModulePlan(id: string): ReturnType<typeof createModuleTestPlan> {
+  let plan = hostPlans.get(id)
+  if (!plan) {
+    plan = createModuleTestPlan(id, hostBoundaryManifest)
+    hostPlans.set(id, plan)
+  }
+  return plan
+}
+
 it('retains dedicated downstream host evidence while excluding independent upstream suites', async () => {
   const { createAffectedTestPlan, createModuleTestPlan } = await import('./module-test-impact.mjs')
   const manifest = structuredClone(hostBoundaryManifest)
@@ -332,22 +343,16 @@ const hostBoundaryCases = (
 })
 
 it('includes host modules with selective test plans', async () => {
-  const { createModuleTestPlan } = await import('./module-test-impact.mjs')
-  expect(
-    hostBoundaryCases.some(
-      ({ id }) => createModuleTestPlan(id, hostBoundaryManifest).mode === 'selective'
-    )
-  ).toBe(true)
+  expect(hostBoundaryCases.some(({ id }) => hostModulePlan(id).mode === 'selective')).toBe(true)
 })
 
 // Each module keeps its own timeout as the ownership manifest grows.
 it.each(hostBoundaryCases)(
   'host-only selective plans exclude independent upstream package suites: $id',
   async ({ id, source }) => {
-    const { createAffectedTestPlan, createModuleTestPlan } =
-      await import('./module-test-impact.mjs')
+    const { createAffectedTestPlan } = await import('./module-test-impact.mjs')
     for (const plan of [
-      createModuleTestPlan(id, hostBoundaryManifest),
+      hostModulePlan(id),
       createAffectedTestPlan(
         [{ path: source, status: 'modified' }],
         { status: 'not-requested', testFiles: [] },
@@ -442,11 +447,14 @@ it('Compute host edits never register or select upstream Compute units', async (
     const plan = createAffectedTestPlan([{ path, status: 'modified' }], graph)
     if (
       path.startsWith('src/main/literature/') ||
-      path.startsWith('src/renderer/src/pages/literature/')
+      path.startsWith('src/renderer/src/pages/literature/') ||
+      path === 'src/main/settings/document-store.ts'
     ) {
       expect(plan.mode, path).toBe('full')
       expect(plan.reasonChains).toContainEqual(
-        expect.stringMatching(/^(main_literature|page_literature) -> .+ -> full$/)
+        expect.stringMatching(
+          /^(main_literature|page_literature|settings_repository) -> .+ -> full$/
+        )
       )
       continue
     }
@@ -476,10 +484,9 @@ it('Compute host edits never register or select upstream Compute units', async (
 it.each(Object.entries(hostBoundaryManifest.modules) as [string, { ownerPaths: string[] }][])(
   '%s module plan excludes unrelated upstream package tests',
   async (id, module) => {
-    const { createModuleTestPlan } = await import('./module-test-impact.mjs')
     // Validate executed coverage while the trusted retirement policy permits cleanup of
     // historical redundant registrations. Full-validation owners retain their fallback.
-    const plan = createModuleTestPlan(id, hostBoundaryManifest)
+    const plan = hostModulePlan(id)
     if (plan.mode === 'full') return
     const { excluded } = createPackageTestPlan(module.ownerPaths, registry)
     expect(
@@ -517,11 +524,14 @@ it('selects durable file consumers downstream without testing unchanged prerequi
     const plan = createAffectedTestPlan([{ path, status: 'modified' }], graph)
     if (
       path.startsWith('src/main/literature/') ||
-      path.startsWith('src/renderer/src/pages/literature/')
+      path.startsWith('src/renderer/src/pages/literature/') ||
+      path === 'src/main/settings/document-store.ts'
     ) {
       expect(plan.mode, path).toBe('full')
       expect(plan.reasonChains).toContainEqual(
-        expect.stringMatching(/^(main_literature|page_literature) -> .+ -> full$/)
+        expect.stringMatching(
+          /^(main_literature|page_literature|settings_repository) -> .+ -> full$/
+        )
       )
       continue
     }
@@ -581,29 +591,14 @@ it('routes download package changes downstream and honors full host owners', asy
     `${packageRoot}/src/errors.ts`,
     `${packageRoot}/src/download-speed.ts`
   ]) {
-    expect(createPackageTestPlan([path], registry).selected, path).toEqual([packageRoot])
+    expect(createPackageTestPlan([path], registry).selected.sort(), path).toEqual(
+      [packageRoot, 'packages/literature-discovery', 'packages/literature-library'].sort()
+    )
     const plan = createAffectedTestPlan([{ path, status: 'modified' }], graph)
-    expect(plan.mode).toBe('selective')
-    expect(plan.testFiles).toEqual(
-      expect.arrayContaining([
-        `${packageRoot}/src/resilient-download.test.ts`,
-        `${packageRoot}/src/transport.test.ts`,
-        'src/main/update/downloader.test.ts',
-        'src/main/local-models/download.test.ts',
-        'src/main/local-models/owner.test.ts',
-        'src/main/notebook/environment-download.contract.test.ts',
-        'src/main/notebook/windows-runtime-download.contract.test.ts',
-        'src/main/session-package/transfer.test.ts'
-      ])
+    expect(plan.mode).toBe('full')
+    expect(plan.reasonChains).toContain(
+      `resilient_download -> ${loadModuleImpactManifest().modules.resilient_download.fullTestReason} -> full`
     )
-    expect(plan.capabilityOverlays).toEqual(
-      expect.arrayContaining(['windows_sensitive', 'notebook_network_sandbox'])
-    )
-    for (const entry of registry.packages)
-      expect(
-        plan.testFiles.some((file) => file.startsWith(entry.root + '/')),
-        `${path} -> ${entry.root}`
-      ).toBe(entry.root === packageRoot)
   }
   for (const [path, test] of [
     ['src/main/update/downloader.ts', 'src/main/update/downloader.test.ts'],

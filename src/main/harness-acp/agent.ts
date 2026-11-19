@@ -1,3 +1,4 @@
+import { SCHEDULE_TURN_META } from '../../shared/session-schedules'
 import * as acp from '@agentclientprotocol/sdk'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises'
@@ -14,9 +15,12 @@ import {
   type ModelUsage,
   type Json
 } from '@aipoch/agent-harness'
-import { createChatCompletionsModel } from '@aipoch/agent-harness/chat-completions'
+import {
+  createChatCompletionsModel,
+  ChatCompletionsError
+} from '@aipoch/agent-harness/chat-completions'
 import { createResponsesModel, ResponsesError } from '@aipoch/agent-harness/responses'
-import { createMessagesModel } from '@aipoch/agent-harness/messages'
+import { createMessagesModel, MessagesError } from '@aipoch/agent-harness/messages'
 import {
   HARNESS_AUTH_METHOD,
   HARNESS_INSTRUCTIONS,
@@ -51,6 +55,19 @@ const DELTA_SAFETY = 0.8
 const ENVELOPE_TOKENS = 64
 
 const hash = (text: string): string => createHash('sha256').update(text).digest('base64')
+
+// ACP requires every Agent to accept resource links in prompts. Keep the reference visible to the
+// model without fetching it: the host may send private file URIs, and the harness deliberately does
+// not grant arbitrary filesystem or network access to model adapters.
+const formatResourceLink = (name: string | undefined, uri: string): string => {
+  const displayName =
+    name && name.length > 0
+      ? name
+      : uri.startsWith('file://')
+        ? (uri.replace('file://', '').split('/').pop() ?? uri)
+        : undefined
+  return displayName ? `[@${displayName}](${uri})` : uri
+}
 
 const snapshot = (request: Pick<ModelRequest, 'instructions' | 'tools' | 'messages'>): Snapshot => {
   const texts = request.messages.map((message) => JSON.stringify(message))
@@ -210,9 +227,12 @@ export function createToolResultClearing(
 }
 
 type Entry = {
+  model: string
+  setScheduleTurn(ref: string | undefined): void
   session: AgentSession
   /** True once per provider context-overflow rejection observed since the last call. */
   takeOverflow(): boolean
+  takeOutputTruncation(): boolean
   close(): Promise<void>
   flush(): Promise<void>
   reconcile(): Promise<void>
@@ -386,6 +406,7 @@ export function createHarnessAcpAgent(directory: string): {
       const inputBudget = Math.floor(config.contextWindow * 0.9) - outputReserve
       const clearing = createToolResultClearing(inputBudget, meter)
       let overflow = false
+      let outputTruncated = false
       const onEvent = (event: AgentEvent): void => {
         if (event.type === 'compaction') {
           const started = event.status === 'started'
@@ -410,6 +431,7 @@ export function createHarnessAcpAgent(directory: string): {
           })
         } else if (event.type === 'model') {
           if (event.purpose === 'compaction') return
+          if (event.event.type === 'finish') outputTruncated = event.event.reason === 'length'
           if (event.event.type === 'finish' && event.event.usage)
             meter.reported(event.requestId, event.event.usage)
           if (event.event.type === 'finish' && event.event.usage)
@@ -496,7 +518,26 @@ export function createHarnessAcpAgent(directory: string): {
           const headers = new Headers(init?.headers)
           headers.set('user-agent', 'open-science-agent/0.1.0')
           if (target.sessionHeader) headers.set(target.sessionHeader, id)
-          const response = await fetch(url, { ...init, headers })
+          let response = await fetch(url, { ...init, headers })
+          if (
+            !response.ok &&
+            response.headers.get('x-open-science-provider-failure') === 'connection'
+          ) {
+            void response.body?.cancel().catch(() => undefined)
+            throw new Error('Model provider connection failed')
+          }
+          // The endpoint is restricted to host loopback; only here trust the bridge's original status.
+          const upstreamStatus = Number(response.headers.get('x-open-science-upstream-status'))
+          if (
+            !response.ok &&
+            Number.isInteger(upstreamStatus) &&
+            upstreamStatus >= 400 &&
+            upstreamStatus <= 599
+          )
+            response = new Response(response.body, {
+              status: upstreamStatus,
+              headers: response.headers
+            })
           if (!response.ok && (await isContextOverflowResponse(response, init?.signal))) {
             overflow = true
             meter.overflowed(target.contextWindow)
@@ -565,10 +606,17 @@ export function createHarnessAcpAgent(directory: string): {
       }
       signal.throwIfAborted()
       entries.set(id, {
+        model: target.model,
         session,
+        setScheduleTurn: mcp.setScheduleTurn,
         takeOverflow: () => {
           const observed = overflow
           overflow = false
+          return observed
+        },
+        takeOutputTruncation: () => {
+          const observed = outputTruncated
+          outputTruncated = false
           return observed
         },
         close,
@@ -672,8 +720,16 @@ export function createHarnessAcpAgent(directory: string): {
             }
             if (block.type === 'resource' && 'text' in block.resource)
               return { type: 'text', text: block.resource.text }
+            if (block.type === 'resource_link')
+              return { type: 'text', text: formatResourceLink(block.name, block.uri) }
             throw new Error('Unsupported prompt content; host must resolve references')
           })
+          const references = context.params.prompt.flatMap((block) => {
+            const ref = block._meta?.[SCHEDULE_TURN_META]
+            return typeof ref === 'string' && ref.length <= 100 ? [ref] : []
+          })
+          if (references.length > 1) throw new Error('Ambiguous Schedule turn context')
+          entry.setScheduleTurn(references[0])
           entry.active = true
           entry.cancelled = false
           try {
@@ -689,6 +745,7 @@ export function createHarnessAcpAgent(directory: string): {
             const before = await entry.session.inspect()
             assertKnown(before)
             entry.takeOverflow()
+            entry.takeOutputTruncation()
             // A provider context overflow already lowered the meter's estimate. Continue the same turn
             // once so the next request compacts first; the rejected request executed no tool.
             const status = await entry.session
@@ -703,19 +760,35 @@ export function createHarnessAcpAgent(directory: string): {
                 await entry.flush()
                 if (!entry.cancelled) assertKnown(await entry.session.inspect())
                 if (
-                  error instanceof ResponsesError &&
-                  [
-                    'insufficient_quota',
-                    'rate_limit_exceeded',
-                    'model_not_found',
-                    'authentication_error'
-                  ].includes(error.code)
-                )
+                  error instanceof ChatCompletionsError ||
+                  error instanceof ResponsesError ||
+                  error instanceof MessagesError
+                ) {
+                  const protocol =
+                    error instanceof ChatCompletionsError
+                      ? 'chat-completions'
+                      : error instanceof ResponsesError
+                        ? 'responses'
+                        : 'messages'
+                  const diagnostics = error.diagnostics ?? {}
+                  const phase =
+                    'phase' in diagnostics && typeof diagnostics.phase === 'string'
+                      ? diagnostics.phase
+                      : error.code === 'http' || error.code === 'network'
+                        ? 'response'
+                        : 'provider'
                   throw new acp.RequestError(-32603, error.message, {
                     errorName: 'APIError',
-                    errorKind: error.code,
-                    ...(error.status === undefined ? {} : { status: error.status })
+                    errorKind: 'provider-error',
+                    model: entry.model,
+                    protocol,
+                    adapterCode: error.code,
+                    ...(error.status === undefined ? {} : { status: error.status }),
+                    ...(diagnostics.reason ? { code: diagnostics.reason } : {}),
+                    ...(diagnostics.requestId ? { requestId: diagnostics.requestId } : {}),
+                    phase
                   })
+                }
                 throw error
               })
             await entry.flush()
@@ -733,7 +806,9 @@ export function createHarnessAcpAgent(directory: string): {
                   ? 'end_turn'
                   : status === 'cancelled'
                     ? 'cancelled'
-                    : 'max_turn_requests',
+                    : entry.takeOutputTruncation()
+                      ? 'max_tokens'
+                      : 'max_turn_requests',
               _meta: {
                 'open-science-agent/requests': requests.map(({ id, status, usage }) => ({
                   id,
@@ -743,6 +818,7 @@ export function createHarnessAcpAgent(directory: string): {
               }
             }
           } finally {
+            entry.setScheduleTurn(undefined)
             entry.active = false
           }
         })()

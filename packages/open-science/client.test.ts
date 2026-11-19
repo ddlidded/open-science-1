@@ -52,6 +52,88 @@ afterEach(async () => {
 })
 
 describe('OpenScienceClient', () => {
+  it('retains the receipt identity when the deadline expires just after admission', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(0)
+    try {
+      const client = new OpenScienceClient({ baseUrl: 'http://localhost', token: 'test' })
+      vi.spyOn(client, 'submitRun').mockImplementation(async () => {
+        now.mockReturnValue(101)
+        return { requestId: 'admitted', status: 'pending', createdAt: 0 }
+      })
+      await expect(
+        client.startRun(
+          { project: 'project', prompt: 'Research' },
+          {
+            requestId: 'admitted',
+            timeoutMs: 100
+          }
+        )
+      ).rejects.toMatchObject({ code: 'timeout', requestId: 'admitted' })
+    } finally {
+      now.mockRestore()
+    }
+  })
+
+  it.each(['wait', 'start'])(
+    'shares one deadline across durable %s requests',
+    async (operation) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(0)
+      try {
+        const fetch = vi.fn(
+          (url: string, init?: RequestInit) =>
+            new Promise<Response>((resolve, reject) => {
+              const timer = setTimeout(
+                () =>
+                  resolve(
+                    response(
+                      200,
+                      url.endsWith('/api/bootstrap')
+                        ? { taskCapabilities: ['durable-submissions'] }
+                        : url.includes('/run-submissions/')
+                          ? {
+                              data: {
+                                requestId: 'deadline-test',
+                                status: 'accepted',
+                                runId: 'run-1'
+                              }
+                            }
+                          : { data: { id: 'run-1', status: 'completed' } }
+                    )
+                  ),
+                70
+              )
+              init?.signal?.addEventListener(
+                'abort',
+                () => {
+                  clearTimeout(timer)
+                  reject(init.signal?.reason)
+                },
+                { once: true }
+              )
+            })
+        )
+        const client = new OpenScienceClient({ baseUrl: 'http://localhost', token: 'test', fetch })
+        const pending =
+          operation === 'wait'
+            ? client.waitForSubmission('deadline-test', { timeoutMs: 100 })
+            : client.startRun(
+                { project: 'project', prompt: 'Research' },
+                { requestId: 'deadline-test', timeoutMs: 100 }
+              )
+        const assertion = expect(pending).rejects.toMatchObject({
+          code: 'timeout',
+          requestId: 'deadline-test'
+        })
+        await vi.advanceTimersByTimeAsync(100)
+        await assertion
+        expect(fetch).toHaveBeenCalledTimes(2)
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+  )
+
   it.each([false, true])(
     'requires unattended capability before submitting work (supported=%s)',
     async (supported) => {
@@ -122,6 +204,10 @@ describe('OpenScienceClient', () => {
         'updateAgentRouting',
         'getSessionPlan',
         'respondSessionPlan',
+        'submitRun',
+        'getSubmission',
+        'waitForSubmission',
+        'forkSession',
         'startRun',
         'getRun',
         'cancelRun',
@@ -662,6 +748,106 @@ describe('OpenScienceClient', () => {
       await vi.advanceTimersByTimeAsync(30_000)
 
       expect(outcome).toMatchObject({ code: 'timeout' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('lets an artifact download outlast the request timeout while chunks keep arriving', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    try {
+      const fetch = vi.fn((_input: string, init?: RequestInit) => {
+        const signal = init?.signal
+        return Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                signal?.addEventListener('abort', () => controller.error(signal.reason), {
+                  once: true
+                })
+                for (let index = 1; index <= 6; index += 1) {
+                  setTimeout(() => {
+                    controller.enqueue(new TextEncoder().encode(`chunk-${index};`))
+                    if (index === 6) controller.close()
+                  }, index * 20_000)
+                }
+              }
+            }),
+            { status: 200 }
+          )
+        )
+      })
+      const client = new OpenScienceClient({
+        baseUrl: 'http://127.0.0.1:44100',
+        token: 'secret-token',
+        fetch,
+        requestTimeoutMs: 30_000
+      })
+      const response = await client.downloadArtifact('artifact-1')
+      let outcome: unknown = 'still-pending'
+      void response.text().then(
+        (text) => {
+          outcome = text
+        },
+        (error: unknown) => {
+          outcome = error
+        }
+      )
+
+      await vi.advanceTimersByTimeAsync(120_000)
+
+      expect(outcome).toBe('chunk-1;chunk-2;chunk-3;chunk-4;chunk-5;chunk-6;')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('times out an artifact download once its body stops sending data', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    try {
+      const fetch = vi.fn((_input: string, init?: RequestInit) => {
+        const signal = init?.signal
+        return Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                signal?.addEventListener('abort', () => controller.error(signal.reason), {
+                  once: true
+                })
+                setTimeout(() => controller.enqueue(new TextEncoder().encode('partial')), 20_000)
+              }
+            }),
+            { status: 200 }
+          )
+        )
+      })
+      const client = new OpenScienceClient({
+        baseUrl: 'http://127.0.0.1:44100',
+        token: 'secret-token',
+        fetch,
+        requestTimeoutMs: 30_000
+      })
+      const response = await client.downloadArtifact('artifact-1')
+      let outcome: unknown = 'still-pending'
+      void response.text().then(
+        () => {
+          outcome = 'resolved'
+        },
+        (error: unknown) => {
+          outcome = error
+        }
+      )
+
+      await vi.advanceTimersByTimeAsync(49_999)
+      expect(outcome).toBe('still-pending')
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(outcome).toMatchObject({
+        code: 'timeout',
+        message: 'Open-Science request timed out after 30000 milliseconds.'
+      })
     } finally {
       vi.useRealTimers()
     }
@@ -1329,4 +1515,13 @@ describe('Session package RPC', () => {
       }
     }
   )
+})
+
+it('does not interpret an unknown Run status as completion', async () => {
+  const client = new OpenScienceClient({
+    baseUrl: 'http://fixture.invalid',
+    token: 'test',
+    fetch: async () => response(200, { data: { id: 'run-1', status: 'preparing' } })
+  })
+  await expect(client.waitForRun('run-1')).rejects.toMatchObject({ code: 'invalid_response' })
 })

@@ -8,7 +8,6 @@ import {
   type ServiceLifetimeRecord
 } from './local-service-lifetime'
 import { terminateVerifiedService } from './verified-service-stop'
-import { terminateProcessTree } from './process-tree'
 import { connectDesktopRuntime } from './desktop-runtime-client'
 import type { DesktopShutdownWork } from './desktop-runtime-lifecycle'
 import { runtimeStartupOptionsSchema, type RuntimeStartupOptions } from './desktop-runtime-info'
@@ -23,6 +22,7 @@ import {
   terminateVerifiedLegacyRuntime,
   type LegacyTerminationDeps
 } from './legacy-service-termination'
+import { startLaunchLogReader } from '../../packages/open-science/launch-log.mjs'
 import { pruneBackendStartupLogs } from './backend-startup-log-retention'
 import { randomUUID } from 'node:crypto'
 import {
@@ -617,6 +617,7 @@ export async function startOrAttachDesktopBackend(options: {
     ...process.env,
     OPEN_SCIENCE_CONFIG_ROOT: options.configRoot,
     OPEN_SCIENCE_USER_DATA: options.profilePath,
+    OPEN_SCIENCE_CAPTURED_LAUNCH_OUTPUT: '1',
     OPEN_SCIENCE_STARTUP_ATTEMPT: attemptId
   }
   // A direct backend/CLI process may inherit a stale handoff path from its parent. Never let a
@@ -668,9 +669,12 @@ export async function startOrAttachDesktopBackend(options: {
   const onError = (error: Error): void => {
     failure = error
   }
+  let capture: Awaited<ReturnType<typeof startLaunchLogReader>> | undefined
   try {
     options.signal?.throwIfAborted()
     await options.beforeLaunch?.()
+    options.signal?.throwIfAborted()
+    capture = await startLaunchLogReader(options.command, file.fd, options.serviceLauncher)
     options.signal?.throwIfAborted()
     child = spawn(
       options.serviceLauncher ?? options.command,
@@ -686,18 +690,19 @@ export async function startOrAttachDesktopBackend(options: {
         env,
         detached: true,
         windowsHide: true,
-        stdio: ['ignore', file.fd, file.fd, 'ipc']
+        stdio: ['ignore', capture.input, capture.input, 'ipc']
       }
     )
     // Spawn errors can fire before the asynchronous descriptor close settles.
     child.on('error', onError)
     child.on('message', onMessage)
   } catch (error) {
-    await file.close()
     if (credentialInventoryPath) await removeCredentialInventory(credentialInventoryPath)
     throw error
+  } finally {
+    capture?.input.destroy()
+    await file.close()
   }
-  await file.close()
   child.unref()
   child.channel?.unref()
   try {
@@ -761,6 +766,7 @@ export async function startOrAttachDesktopBackend(options: {
       (options.signal?.aborted || (error instanceof DesktopBackendStartupError && !error.canRetry))
     ) {
       // A blocked credential helper must not outlive an abandoned launch attempt.
+      const { terminateProcessTree } = await import('./process-tree.js')
       const stopped = await terminateProcessTree(child, 'SIGKILL')
       if (stopped.reaped && error instanceof DesktopBackendStartupError)
         throw new DesktopBackendStartupError(

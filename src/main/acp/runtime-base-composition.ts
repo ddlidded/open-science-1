@@ -100,6 +100,9 @@ const composeAcpRuntimeBaseOwners = (options: AcpRuntimeOptions) => {
           runRegistry: artifactRunRegistry,
           issueRpcCapability: options.artifacts.issueRpcCapability,
           revokeRpcCapability: options.artifacts.revokeRpcCapability,
+          ...(options.artifacts.enableImageGeneration
+            ? { allowedMethods: ['artifactSaveVersion', 'imageGenerate'] as const }
+            : {}),
           provenance: options.artifacts.provenance,
           ...(options.notebook
             ? {
@@ -215,6 +218,7 @@ const composeAcpRuntimeBaseOwners = (options: AcpRuntimeOptions) => {
     }
   }
   const sessionCapabilities = new AcpSessionCapabilityOwner({
+    schedules: options.schedules,
     registerBridgeMcpSession: (sessionId, tools, namespaces) =>
       connectionResources.registerBridgeMcpSession(sessionId, tools, namespaces),
     unregisterBridgeMcpSession: (sessionId) =>
@@ -225,6 +229,16 @@ const composeAcpRuntimeBaseOwners = (options: AcpRuntimeOptions) => {
     plan: options.plan,
     sideChat: options.sideChat,
     wslSetupSessions: options.wslSetupSessions,
+    pptx: options.pptx
+      ? {
+          handlerFor: (appSessionId, projectId) => ({
+            read: (input, signal) =>
+              options.pptx!.agent.read({ projectId, sessionId: appSessionId, signal }, input),
+            propose: (input, signal) =>
+              options.pptx!.agent.propose({ projectId, sessionId: appSessionId, signal }, input)
+          })
+        }
+      : undefined,
     literature: options.literature
       ? {
           isEnabled: options.literature.isEnabled,
@@ -573,7 +587,8 @@ const composeAcpRuntimeBaseOwners = (options: AcpRuntimeOptions) => {
     backendGeneration,
     providerPromptExecutor: new AcpProviderPromptExecutor({
       backendGeneration,
-      opencodeUsageFetch: options.opencodeUsageFetch
+      opencodeUsageFetch: options.opencodeUsageFetch,
+      recoverOutputTruncation: options.recoverOutputTruncation
     }),
     providerPromptSerialization: new AcpProviderPromptSerializationOwner(),
     contextUsageTracker,

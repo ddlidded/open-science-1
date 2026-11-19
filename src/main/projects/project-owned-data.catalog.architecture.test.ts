@@ -216,8 +216,10 @@ describe('Project-owned data catalog architecture', () => {
       'permission-grants',
       'project-preview-state',
       'session-replay',
+      'session-history-index',
       'vision-evidence',
       'session-metadata-usage-history',
+      'session-schedules',
       'background-result-delivery',
       'notification-inbox-history',
       'literature-inbox-provenance',
@@ -266,8 +268,58 @@ describe('Project-owned data catalog architecture', () => {
       'project-session-json-delete',
       'provenance-tail',
       'review-tail',
+      'schedule-target-delete',
       'side-chat-profile-tail'
     ])
+  })
+
+  it('proves Session history projection cleanup follows Session and Project deletion', () => {
+    expect(
+      PROJECT_OWNED_DATA_CATALOG.find((entry) => entry.id === 'session-history-index')
+    ).toMatchObject({
+      medium: 'sqlite',
+      resources: ['SessionHistoryIndex', 'SessionHistoryItem'],
+      policy: {
+        kind: 'coordinator-cleanup',
+        effect: 'hard-delete',
+        path: 'project-session-json-delete',
+        operation: 'SessionHistoryProjectionRepository.delete and deleteProjectHistory'
+      }
+    })
+
+    const sessionItemRelation = Prisma.dmmf.datamodel.models
+      .find((model) => model.name === 'SessionHistoryItem')
+      ?.fields.find((field) => field.kind === 'object' && field.name === 'history')
+    expect(sessionItemRelation).toMatchObject({
+      type: 'SessionHistoryIndex',
+      relationFromFields: ['sessionId'],
+      relationOnDelete: 'Cascade'
+    })
+
+    expectCall(
+      classMethod(
+        'src/main/session-persistence/projection.ts',
+        'SessionProjectionRepository',
+        'commitDelete'
+      ),
+      'this.history.delete'
+    )
+    expectCall(
+      classMethod(
+        'src/main/session-persistence/projection.ts',
+        'SessionProjectionRepository',
+        'deleteProjectHistory'
+      ),
+      '(await this.client()).sessionHistoryIndex.deleteMany'
+    )
+    expectCall(
+      classMethod(
+        'src/main/session-persistence/history-projection.ts',
+        'SessionHistoryProjectionRepository',
+        'delete'
+      ),
+      '(transaction ?? (await this.prisma())).sessionHistoryIndex.deleteMany'
+    )
   })
 
   it('catalogs current and legacy execution evidence roots as Project-owned data', () => {
@@ -522,11 +574,36 @@ describe('Project-owned data catalog architecture', () => {
       (call) =>
         projectionAfterCommit &&
         call.position > projectionAfterCommit.position &&
-        call.callee === 'this.notifySessionsDeleted'
+        call.callee === 'onDeleted'
     )
     expect(commitAfterAuthority).toBeDefined()
     expect(projectionAfterCommit).toBeDefined()
     expect(notificationAfterProjection).toBeDefined()
+
+    const coordinatorDeletion = classMethod(
+      'src/main/session-persistence/coordinator.ts',
+      'SessionPersistenceCoordinator',
+      'deleteProjectSessions'
+    )
+    expectCallsInOrder(coordinatorDeletion, [
+      'this.withDeletionCleanup',
+      'this.operationScheduler.runProject',
+      'this.deletionOwner.deleteProjectSessions'
+    ])
+    expect(
+      expectCall(
+        coordinatorDeletion,
+        'this.deletionOwner.deleteProjectSessions'
+      ).call.arguments[2].getText(coordinatorDeletion.file)
+    ).toBe('onDeleted')
+    expectCall(
+      classMethod(
+        'src/main/session-persistence/coordinator.ts',
+        'SessionPersistenceCoordinator',
+        'withDeletionCleanup'
+      ),
+      'this.notifySessionsDeleted'
+    )
 
     expectCall(
       classMethod(
@@ -634,13 +711,26 @@ describe('Project-owned data catalog architecture', () => {
         ).node.getText()
       )
     ).toBe("'deleted-sessions'")
-    expectCallsInOrder(
-      classMethod(
-        'src/main/session-persistence/repository.ts',
-        'SessionRepository',
-        'deleteProjectSessions'
-      ),
-      ['writeFile', 'rename']
+    const deleteProjectSessions = classMethod(
+      'src/main/session-persistence/repository.ts',
+      'SessionRepository',
+      'deleteProjectSessions'
+    )
+    expectCallsInOrder(deleteProjectSessions, [
+      'this.mutateCatalog',
+      'writeFile',
+      'this.dependencies.renameFile'
+    ])
+    const markerWrite = expectCall(deleteProjectSessions, 'writeFile')
+    expect(normalized(markerWrite.call.arguments[0].getText(deleteProjectSessions.file))).toBe(
+      'join(liveProjectDir,PROJECT_DELETION_COMMIT_MARKER)'
+    )
+    const deletionSource = normalized(
+      deleteProjectSessions.node.getText(deleteProjectSessions.file)
+    )
+    expect(deletionSource).toContain('awaitthis.mutateCatalog(()=>writeFile(')
+    expect(deletionSource).toContain(
+      'awaitthis.dependencies.renameFile(liveProjectDir,deletedProjectDir)'
     )
     expectCall(
       classMethod(

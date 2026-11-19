@@ -1,3 +1,11 @@
+import { scheduleToolPresentation } from './schedules/schedule-tool-presentation'
+import {
+  findImageToolSourceName,
+  imageToolOperation,
+  readImageToolSource,
+  type ImageSourceSession
+} from './image-tool-presentation'
+import { WorkspaceImageToolCard } from './WorkspaceImageToolCard'
 import { formatNetworkHostname } from '../../../../shared/notebook-network-settings'
 import {
   SplitButton,
@@ -69,6 +77,7 @@ type PermissionApprovalControlsProps = {
   // Session locator for the notebook env badge; optional so the controls render standalone
   // (isolation tests, sessions without notebook context).
   notebookLookup?: NotebookSessionRequest
+  imageSourceSession?: ImageSourceSession
 }
 
 type PermissionApprovalCardProps = Omit<PermissionApprovalControlsProps, 'requests'> & {
@@ -484,7 +493,7 @@ const NotebookNetworkApprovalDetail = ({
         <dd className="break-all font-mono text-foreground">
           {formatNetworkHostname(approval.hostname)}
         </dd>
-        <dt>{t('Protocol')}</dt>
+        <dt>{t('Network protocol')}</dt>
         <dd className="font-mono text-foreground">{approval.protocol.toUpperCase()}</dd>
         <dt>{t('Port')}</dt>
         <dd className="font-mono text-foreground">
@@ -638,10 +647,12 @@ const useNotebookEnvironment = (
 
 const PermissionImpactTip = ({
   description,
-  detail
+  detail,
+  scopeDescription
 }: {
   description: string
   detail?: string
+  scopeDescription?: string
 }): React.JSX.Element => {
   const { t } = useTranslation()
 
@@ -662,6 +673,7 @@ const PermissionImpactTip = ({
           <div className="space-y-1">
             {detail ? <p>{detail}</p> : null}
             <p className={detail ? 'text-muted-foreground' : undefined}>{description}</p>
+            {scopeDescription ? <p>{scopeDescription}</p> : null}
           </div>
         </TooltipContent>
       </Tooltip>
@@ -720,6 +732,7 @@ const PermissionApprovalCard = ({
   onRespond,
   embedded = false,
   notebookLookup,
+  imageSourceSession,
   disabled = false,
   onSubmitted
 }: PermissionApprovalCardProps): React.JSX.Element => {
@@ -774,6 +787,64 @@ const PermissionApprovalCard = ({
     runtimeSelection && typeof runtimeSelection.previousRuntimeId === 'string'
       ? String(runtimeSelection.previousLabel || runtimeSelection.previousRuntimeId)
       : undefined
+  const imageOperation = imageToolOperation(
+    request.mcpIdentity,
+    request.providerToolName,
+    request.title
+  )
+  const source = imageOperation === 'edit' ? readImageToolSource(request.rawInput) : undefined
+  const sourceName = findImageToolSourceName(source, imageSourceSession)
+  const [resolvedImageSource, setResolvedImageSource] = useState<{ key: string; name: string }>()
+  const sourceFileId = source?.fileId
+  const sourceVersionId = source?.versionId
+  const sourceKind = source?.kind
+  const lookupProjectId = notebookLookup?.projectId
+  const lookupSessionId = notebookLookup?.sessionId
+  const sourceLookupKey = JSON.stringify([
+    sourceKind,
+    sourceFileId,
+    sourceVersionId,
+    lookupProjectId,
+    lookupSessionId
+  ])
+  useEffect(() => {
+    if (
+      sourceName ||
+      !sourceKind ||
+      !sourceFileId ||
+      !sourceVersionId ||
+      !lookupProjectId ||
+      !lookupSessionId
+    )
+      return
+    let active = true
+    void window.api?.previewResources
+      ?.acquire({
+        source: sourceKind === 'artifact-version' ? 'artifact' : 'upload',
+        projectId: lookupProjectId,
+        fileId: sourceFileId,
+        versionId: sourceVersionId,
+        imagePreview: 'thumbnail',
+        ...(sourceKind === 'artifact-version' ? { imageGenerationSessionId: lookupSessionId } : {})
+      })
+      .then((resource) => {
+        if (active && resource.filename)
+          setResolvedImageSource({ key: sourceLookupKey, name: resource.filename })
+        return window.api.previewResources.release({ resourceId: resource.id })
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [
+    sourceName,
+    sourceKind,
+    sourceFileId,
+    sourceVersionId,
+    lookupProjectId,
+    lookupSessionId,
+    sourceLookupKey
+  ])
   const permCode = codeReview || selectedLabel ? undefined : extractPermissionCode(request)
   // A skills/load_skill approval names the skill being loaded; the section resolves the SKILL.md
   // document (managed catalog first, then the connector-aware main resolver) and falls back to the
@@ -785,6 +856,9 @@ const PermissionApprovalCard = ({
     : libraryAction
       ? buildLiteratureLibraryToolSummary(libraryAction, request.rawInput)
       : undefined
+  const schedule = isMcpPermissionRequest(request)
+    ? scheduleToolPresentation(request.mcpIdentity, request.rawInput, t)
+    : undefined
   const notebookSummary = isMcpPermissionRequest(request)
     ? buildNotebookToolSummary(request.mcpIdentity, request.rawInput, undefined, t, true)
     : undefined
@@ -825,10 +899,12 @@ const PermissionApprovalCard = ({
   const sourcePresentation = describePermissionRequest(request)
   const presentation: PermissionPresentation = {
     ...sourcePresentation,
-    actionTitle: t(sourcePresentation.actionTitleKey ?? sourcePresentation.actionTitle, {
-      ...sourcePresentation.actionTitleValues
-    }),
-    categoryLabel: t(sourcePresentation.categoryLabel),
+    actionTitle:
+      schedule?.summary.title ??
+      t(sourcePresentation.actionTitleKey ?? sourcePresentation.actionTitle, {
+        ...sourcePresentation.actionTitleValues
+      }),
+    categoryLabel: schedule ? t('Schedule') : t(sourcePresentation.categoryLabel),
     description: t(sourcePresentation.description)
   }
   const allowOptionId = getAllowOptionId(request.options, effectiveScope)
@@ -990,7 +1066,7 @@ const PermissionApprovalCard = ({
         data-testid="permission-header"
         className={cn(
           'flex min-w-0 items-center gap-2',
-          codeReview && 'flex-wrap',
+          codeReview && 'flex-col items-stretch gap-3',
           embedded &&
             'sticky top-0 z-10 -mx-4 -mt-4 -mb-3 bg-card px-4 pb-3 pt-4 sm:-mx-5 sm:-mt-5 sm:px-5 sm:pt-5'
         )}
@@ -1007,14 +1083,16 @@ const PermissionApprovalCard = ({
               </span>
             </div>
             {codeReview.environment ? (
-              <Badge
-                variant="secondary"
-                data-testid="permission-env-badge"
-                className="ml-auto min-w-0 max-w-full whitespace-normal break-all"
-                title={t('Environment')}
-              >
-                {codeReview.environment}
-              </Badge>
+              <div className="min-w-0 rounded-md bg-muted/60 px-3 py-2">
+                <span
+                  data-testid="permission-env-badge"
+                  className="line-clamp-2 select-text whitespace-normal break-all text-xs leading-5 text-muted-foreground"
+                  aria-label={t('Environment')}
+                  title={codeReview.environment}
+                >
+                  {codeReview.environment}
+                </span>
+              </div>
             ) : null}
           </>
         ) : (
@@ -1023,14 +1101,20 @@ const PermissionApprovalCard = ({
               <span className={cn(dialogTitleClassName, 'min-w-0 truncate')}>
                 {presentation.actionTitle}
               </span>
-              <PermissionImpactTip description={presentation.description} detail={titleDetail} />
+              <PermissionImpactTip
+                description={presentation.description}
+                detail={titleDetail}
+                scopeDescription={schedule ? scopeDescription : undefined}
+              />
             </div>
-            <PermissionHeaderBadges
-              lookup={notebookLookup}
-              runtime={presentation.notebookRuntime}
-              categoryLabel={presentation.categoryLabel}
-              scopeDescription={scopeDescription}
-            />
+            {!schedule && (
+              <PermissionHeaderBadges
+                lookup={notebookLookup}
+                runtime={presentation.notebookRuntime}
+                categoryLabel={presentation.categoryLabel}
+                scopeDescription={scopeDescription}
+              />
+            )}
           </>
         )}
       </div>
@@ -1088,6 +1172,26 @@ const PermissionApprovalCard = ({
             </p>
           ) : null}
         </div>
+      ) : schedule ? (
+        <div className="space-y-2">
+          <WorkspaceToolSummaryCard summary={schedule.summary} schedule />
+          {schedule.script && (
+            <details>
+              <summary className="cursor-pointer">{t('Script')}</summary>
+              <WorkspaceToolCodeBlock {...schedule.script} />
+            </details>
+          )}
+        </div>
+      ) : imageOperation ? (
+        <WorkspaceImageToolCard
+          key={requestId}
+          operation={imageOperation}
+          input={request.rawInput}
+          inputFilename={
+            sourceName ??
+            (resolvedImageSource?.key === sourceLookupKey ? resolvedImageSource.name : undefined)
+          }
+        />
       ) : notebookSummary || fileSummary ? (
         <div key={requestId} className="space-y-2">
           <WorkspaceToolSummaryCard
@@ -1158,8 +1262,8 @@ const PermissionApprovalCard = ({
               className={cn(
                 'inline-flex h-8 select-none items-center justify-center gap-1 whitespace-nowrap border-0 px-3 text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50',
                 isDeleteRequest
-                  ? 'bg-destructive text-destructive-foreground hover:bg-destructive/80'
-                  : 'bg-primary text-primary-foreground hover:bg-primary/80'
+                  ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                  : 'bg-primary text-primary-foreground hover:bg-primary/90'
               )}
               disabled={disabled || !allowOptionId || isSubmitting}
               onClick={() => {
@@ -1187,8 +1291,8 @@ const PermissionApprovalCard = ({
                   className={cn(
                     'inline-flex h-8 select-none items-center justify-center border-0 px-2 outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50',
                     isDeleteRequest
-                      ? 'bg-destructive text-destructive-foreground hover:bg-destructive/80'
-                      : 'bg-primary text-primary-foreground hover:bg-primary/80'
+                      ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                      : 'bg-primary text-primary-foreground hover:bg-primary/90'
                   )}
                   disabled={isSubmitting}
                 >
@@ -1254,6 +1358,7 @@ const PermissionApprovalControls = ({
   onRespond,
   embedded = false,
   notebookLookup,
+  imageSourceSession,
   disabled = false
 }: PermissionApprovalControlsProps): React.JSX.Element | null => {
   const { t } = useTranslation()
@@ -1289,6 +1394,7 @@ const PermissionApprovalControls = ({
           onRespond={onRespond}
           embedded={embedded}
           notebookLookup={notebookLookup}
+          imageSourceSession={imageSourceSession}
           disabled={disabled}
           onSubmitted={(requestId) => {
             focusReturnFromRef.current = requestId

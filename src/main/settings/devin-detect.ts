@@ -1,10 +1,6 @@
 import path from 'node:path'
 
-import {
-  collectCandidateDirs,
-  createDefaultDetectDeps,
-  type OpencodeDetectDeps
-} from './opencode-detect'
+import { candidateDirs, createDefaultDetectDeps, type OpencodeDetectDeps } from './opencode-detect'
 
 export type DevinDetectDeps = OpencodeDetectDeps
 export type DevinDetectResult = { resolvedPath: string; version?: string }
@@ -19,7 +15,7 @@ export const detectDevin = async (
 ): Promise<DevinDetectResult | undefined> => {
   signal?.throwIfAborted()
   const pathApi = deps.platform === 'win32' ? path.win32 : path.posix
-  for (const dir of await collectCandidateDirs(deps, signal)) {
+  for await (const dir of candidateDirs(deps, signal)) {
     for (const name of binaryNames(deps.platform)) {
       const candidate = pathApi.join(dir, name)
       const executable = await deps.isExecutable(candidate)

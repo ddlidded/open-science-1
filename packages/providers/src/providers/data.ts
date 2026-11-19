@@ -1,3 +1,10 @@
+import {
+  bearerCatalog,
+  publicCatalog,
+  anthropicCatalog,
+  bailianCatalog,
+  openCodeCatalog
+} from './catalog-configurations'
 import type { OfficialVendor } from './types'
 
 // The shipped vendor set. Each entry owns its endpoint and catalog; model lists are intentionally
@@ -8,14 +15,44 @@ import type { OfficialVendor } from './types'
 const definitions: readonly OfficialVendor[] = [
   {
     id: 'openai',
+    modelsListUrl: 'https://api.openai.com/v1/models',
+    modelsList: { ...bearerCatalog, knownModelsOnly: true, fields: { lifecycle: 'shutdown_date' } },
+    imageGeneration: {
+      regions: [{ id: 'global', baseUrl: 'https://api.openai.com/v1' }],
+      models: [
+        { id: 'gpt-image-2.6-sunburst', label: 'GPT Image 2.6 Sunburst' },
+        { id: 'gpt-image-2.6-flare', label: 'GPT Image 2.6 Flare' }
+      ]
+    },
     label: 'OpenAI',
     reasoningEffort: { supported: true, values: ['low', 'medium', 'high', 'xhigh'] },
     apiEndpoints: ['responses'],
     baseUrl: 'https://api.openai.com',
+    responsesBaseUrl: 'https://api.openai.com/v1',
     apiKeyUrl: 'https://platform.openai.com/api-keys',
     // The API exposes a broader mixed catalog (embeddings, image, and audio models); keep the coding
     // catalog curated here instead of importing every id from /v1/models.
     models: [
+      // https://developers.openai.com/api/docs/models/gpt-6.2-sol
+      {
+        id: 'gpt-6.2-sol',
+        contextWindow: 1_050_000,
+        maxOutputTokens: 128_000,
+        reasoningEffort: { supported: true, values: ['low', 'medium', 'high', 'xhigh', 'max'] }
+      },
+      // https://developers.openai.com/api/docs/models/gpt-6.2-astra
+      {
+        id: 'gpt-6.2-astra',
+        contextWindow: 1_050_000,
+        maxOutputTokens: 128_000,
+        reasoningEffort: { supported: true, values: ['low', 'medium', 'high', 'xhigh', 'max'] }
+      },
+      // https://developers.openai.com/api/docs/models/gpt-6.1-sol
+      {
+        id: 'gpt-6.1-sol',
+        contextWindow: 1_050_000,
+        reasoningEffort: { supported: true, values: ['low', 'medium', 'high', 'xhigh', 'max'] }
+      },
       {
         id: 'gpt-5.6-sol',
         contextWindow: 1_050_000,
@@ -23,12 +60,6 @@ const definitions: readonly OfficialVendor[] = [
       },
       {
         id: 'gpt-6-astra',
-        contextWindow: 1_050_000,
-        reasoningEffort: { supported: true, values: ['low', 'medium', 'high', 'xhigh', 'max'] }
-      },
-      // https://developers.openai.com/api/docs/models/gpt-6.1-sol
-      {
-        id: 'gpt-6.1-sol',
         contextWindow: 1_050_000,
         reasoningEffort: { supported: true, values: ['low', 'medium', 'high', 'xhigh', 'max'] }
       },
@@ -73,14 +104,15 @@ const definitions: readonly OfficialVendor[] = [
   },
   {
     id: 'anthropic',
+    modelsListUrl: 'https://api.anthropic.com/v1/models',
+    modelsList: anthropicCatalog,
     label: 'Anthropic',
     reasoningEffort: { supported: true, values: ['low', 'medium', 'high', 'xhigh', 'max'] },
     baseUrl: 'https://api.anthropic.com',
     apiKeyUrl: 'https://console.anthropic.com/settings/keys',
-    modelsListUrl: 'https://api.anthropic.com/v1/models',
     models: [
-      { id: 'claude-opus-5', contextWindow: 1_000_000, maxOutputTokens: 128_000 },
       { id: 'claude-opus-5-5', contextWindow: 1_000_000, maxOutputTokens: 128_000 },
+      { id: 'claude-opus-5', contextWindow: 1_000_000, maxOutputTokens: 128_000 },
       // https://platform.claude.com/docs/en/models/fable-5-2/overview
       { id: 'claude-fable-5-2', contextWindow: 1_000_000, maxOutputTokens: 128_000 },
       { id: 'claude-fable-5-1', contextWindow: 1_000_000, maxOutputTokens: 128_000 },
@@ -102,6 +134,21 @@ const definitions: readonly OfficialVendor[] = [
   },
   {
     id: 'xai',
+    modelsListUrl: 'https://api.x.ai/v1/language-models',
+    modelsList: {
+      ...bearerCatalog,
+      itemsPath: 'models',
+      fields: {
+        name: 'name',
+        supportsImageInput: { path: 'input_modalities', includes: 'image' },
+        efforts: 'capabilities.reasoning_effort'
+      },
+      enrichment: {
+        url: 'https://api.x.ai/v1/models',
+        itemsPath: 'data',
+        fields: { contextWindow: 'context_length' }
+      }
+    },
     label: 'xAI (Grok)',
     // xAI documents four selectable effort values for Grok 4.6 and 4.7. Models with a different capability
     // override this default below; models without a documented effort control stay unsupported.
@@ -150,6 +197,17 @@ const definitions: readonly OfficialVendor[] = [
   },
   {
     id: 'deepseek',
+    modelsListUrl: 'https://api.deepseek.com/v1/models',
+    modelsList: {
+      ...bearerCatalog,
+      fields: {
+        name: 'name',
+        contextWindow: 'context_window',
+        maxOutputTokens: 'max_output_tokens',
+        supportsImageInput: { path: 'input_modalities', includes: 'image' },
+        efforts: 'effort.supported_levels'
+      }
+    },
     label: 'DeepSeek',
     // DeepSeek V4 supports an explicit thinking-off switch plus high/max reasoning effort.
     reasoningEffort: { supported: true, values: ['none', 'high', 'max'] },
@@ -162,11 +220,10 @@ const definitions: readonly OfficialVendor[] = [
     chatCompletionsBaseUrl: 'https://api.deepseek.com/v1',
     responsesBaseUrl: 'https://api.deepseek.com',
     apiKeyUrl: 'https://platform.deepseek.com/api_keys',
-    modelsListUrl: 'https://api.deepseek.com/v1/models',
     models: [
-      { id: 'deepseek-v4-pro', contextWindow: 1_000_000, maxOutputTokens: 384_000 },
       // DeepSeek V4.1 Flash uses the stable API id deepseek-flash.
       { id: 'deepseek-flash', contextWindow: 1_000_000, maxOutputTokens: 384_000 },
+      { id: 'deepseek-v4-pro', contextWindow: 1_000_000, maxOutputTokens: 384_000 },
       { id: 'deepseek-v4-flash', contextWindow: 1_000_000, maxOutputTokens: 384_000 },
       { id: 'deepseek-v4-flash-vision-exp', contextWindow: 1_000_000, maxOutputTokens: 384_000 }
     ],
@@ -182,6 +239,14 @@ const definitions: readonly OfficialVendor[] = [
   },
   {
     id: 'bailian',
+    imageGeneration: {
+      // The chat catalog's global region is US, not Singapore. Do not borrow its key.
+      regions: [{ id: 'china', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' }],
+      models: [
+        { id: 'qwen-image-3.0-pro', label: 'Qwen Image 3.0 Pro' },
+        { id: 'qwen-image-3.0', label: 'Qwen Image 3.0' }
+      ]
+    },
     label: 'Bailian',
     // Keep effort hidden for models that only expose protocol-specific thinking controls. Models
     // with a documented cross-protocol effort vocabulary override this default below.
@@ -194,6 +259,11 @@ const definitions: readonly OfficialVendor[] = [
     regions: [
       {
         id: 'china',
+        modelsListUrl: 'https://{workspaceId}.cn-beijing.maas.aliyuncs.com/api/v1/models',
+        modelsList: {
+          ...bailianCatalog,
+          inputs: [{ id: 'workspaceId', location: 'url', required: true }]
+        },
         label: 'China',
         baseUrl: 'https://dashscope.aliyuncs.com/apps/anthropic/v1/messages',
         chatCompletionsBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -201,6 +271,8 @@ const definitions: readonly OfficialVendor[] = [
       },
       {
         id: 'global',
+        modelsListUrl: 'https://dashscope-us.aliyuncs.com/api/v1/models',
+        modelsList: bailianCatalog,
         label: 'Global',
         baseUrl: 'https://dashscope-us.aliyuncs.com/apps/anthropic/v1/messages',
         chatCompletionsBaseUrl: 'https://dashscope-us.aliyuncs.com/compatible-mode/v1',
@@ -260,12 +332,31 @@ const definitions: readonly OfficialVendor[] = [
   {
     id: 'bailianplan',
     label: 'Bailian for Plan',
-    // The qwen3.8, GLM, and DeepSeek entries below override this conservative default.
     reasoningEffort: { supported: false },
     apiEndpoints: ['messages', 'chat-completions'],
-    baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic',
-    chatCompletionsBaseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
-    apiKeyUrl: 'https://bailian.console.aliyun.com/cn-beijing?tab=plan#/efm/subscription/overview',
+    regions: [
+      {
+        // Existing accounts without a saved region use Beijing.
+        id: 'china',
+        label: 'China (Beijing)',
+        baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic',
+        chatCompletionsBaseUrl:
+          'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+        apiKeyUrl:
+          'https://bailian.console.aliyun.com/cn-beijing?tab=plan#/efm/subscription/overview'
+      },
+      {
+        id: 'global',
+        label: 'International (Singapore)',
+        baseUrl: 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic',
+        chatCompletionsBaseUrl:
+          'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1',
+        apiKeyUrl:
+          'https://modelstudio.console.alibabacloud.com/ap-southeast-1?tab=plan#/efm/subscription/overview'
+      }
+    ],
+    responsesModels: ['qwen4-max-preview'],
+    // General-purpose chat models listed by both the Beijing and Singapore Token Plans.
     models: [
       {
         id: 'qwen3.8-max',
@@ -274,8 +365,15 @@ const definitions: readonly OfficialVendor[] = [
         reasoningEffort: { supported: true, values: ['low', 'medium', 'xhigh'] }
       },
       {
-        id: 'qwen3.8-max-preview',
-        contextWindow: 983_616,
+        id: 'qwen4-max-preview',
+        contextWindow: 1_000_000,
+        maxOutputTokens: 393_216,
+        reasoningEffort: { supported: true, values: ['low', 'medium', 'xhigh'] }
+      },
+      { id: 'auto', contextWindow: 1_000_000, maxOutputTokens: 393_216 },
+      {
+        id: 'qwen3.8-flash',
+        contextWindow: 1_000_000,
         maxOutputTokens: 131_072,
         reasoningEffort: { supported: true, values: ['low', 'medium', 'xhigh'] }
       },
@@ -283,16 +381,39 @@ const definitions: readonly OfficialVendor[] = [
       { id: 'qwen3.7-plus', contextWindow: 1_000_000, maxOutputTokens: 65_536 },
       { id: 'qwen3.6-flash', contextWindow: 1_000_000, maxOutputTokens: 65_536 },
       {
+        id: 'glm-5.3',
+        contextWindow: 1_048_576,
+        maxOutputTokens: 131_072,
+        reasoningEffort: { supported: true, values: ['low', 'high', 'max'] }
+      },
+      {
         id: 'glm-5.2',
         contextWindow: 1_000_000,
         maxOutputTokens: 131_072,
         reasoningEffort: { supported: true, values: ['high', 'max'] }
       },
       {
+        id: 'deepseek-v4.1-flash',
+        contextWindow: 1_000_000,
+        maxOutputTokens: 393_216,
+        reasoningEffort: { supported: true, values: ['low', 'high', 'max'] }
+      },
+      {
+        id: 'deepseek-v4.1-flash-1017',
+        contextWindow: 1_000_000,
+        maxOutputTokens: 393_216
+      },
+      {
         id: 'deepseek-v4-pro',
         contextWindow: 1_000_000,
         maxOutputTokens: 384_000,
         reasoningEffort: { supported: true, values: ['high', 'max'] }
+      },
+      {
+        id: 'deepseek-v4-pro-0813',
+        contextWindow: 1_000_000,
+        maxOutputTokens: 393_216,
+        reasoningEffort: { supported: true, values: ['low', 'high', 'max'] }
       },
       {
         id: 'deepseek-v4-flash-0731',
@@ -302,14 +423,22 @@ const definitions: readonly OfficialVendor[] = [
       }
     ],
     multimodal: {
-      multimodalModels: ['qwen3.8-max', 'qwen3.8-max-preview', 'qwen3.7-plus', 'qwen3.6-flash']
+      multimodalModels: [
+        'qwen3.8-max',
+        'qwen4-max-preview',
+        'qwen3.8-flash',
+        'deepseek-v4.1-flash',
+        'deepseek-v4.1-flash-1017',
+        'qwen3.7-plus',
+        'qwen3.6-flash'
+      ]
     }
   },
   {
     id: 'zhipu',
     label: 'Zhipu AI (GLM)',
     reasoningEffort: { supported: false },
-    // GLM serves overseas from Z.AI and mainland China from BigModel (智谱) — different hosts and
+    // GLM serves overseas from Z.AI and mainland China from BigModel (Zhipu AI) — different hosts and
     // separate consoles, so they are distinct endpoints rather than one base URL. Each region also
     // publishes an OpenAI-compatible route under `/api/paas/v4` (not `/v1`), so Codex can bridge it.
     apiEndpoints: ['messages', 'chat-completions'],
@@ -331,13 +460,13 @@ const definitions: readonly OfficialVendor[] = [
     ],
     models: [
       {
-        id: 'glm-5.3',
+        id: 'glm-5.3-flash',
         contextWindow: 1_000_000,
         maxOutputTokens: 131_072,
         reasoningEffort: { supported: true, values: ['low', 'high', 'max'] }
       },
       {
-        id: 'glm-5.3-flash',
+        id: 'glm-5.3',
         contextWindow: 1_000_000,
         maxOutputTokens: 131_072,
         reasoningEffort: { supported: true, values: ['low', 'high', 'max'] }
@@ -389,13 +518,13 @@ const definitions: readonly OfficialVendor[] = [
     // The coding plan omits glm-5v-turbo, but serves the natively multimodal GLM-5.3-Flash.
     models: [
       {
-        id: 'glm-5.3',
+        id: 'glm-5.3-flash',
         contextWindow: 1_000_000,
         maxOutputTokens: 131_072,
         reasoningEffort: { supported: true, values: ['low', 'high', 'max'] }
       },
       {
-        id: 'glm-5.3-flash',
+        id: 'glm-5.3',
         contextWindow: 1_000_000,
         maxOutputTokens: 131_072,
         reasoningEffort: { supported: true, values: ['low', 'high', 'max'] }
@@ -414,6 +543,15 @@ const definitions: readonly OfficialVendor[] = [
   },
   {
     id: 'kimi',
+    modelsListUrl: 'https://api.moonshot.cn/v1/models',
+    modelsList: {
+      ...bearerCatalog,
+      fields: {
+        contextWindow: 'context_length',
+        supportsImageInput: 'supports_image_in',
+        supportsReasoning: 'supports_reasoning'
+      }
+    },
     label: 'Kimi (Moonshot)',
     reasoningEffort: { supported: true, values: ['low', 'medium', 'high', 'xhigh', 'max'] },
     // Moonshot serves both routes on one host: Anthropic /v1/messages under `/anthropic` and the
@@ -423,9 +561,7 @@ const definitions: readonly OfficialVendor[] = [
     baseUrl: 'https://api.moonshot.cn/anthropic',
     chatCompletionsBaseUrl: 'https://api.moonshot.cn/v1',
     apiKeyUrl: 'https://platform.kimi.com/console',
-    modelsListUrl: 'https://api.moonshot.cn/v1/models',
     models: [
-      { id: 'kimi-k3', contextWindow: 1_000_000, maxOutputTokens: 1_048_576 },
       // https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart
       {
         id: 'kimi-k3.1-pro',
@@ -433,6 +569,7 @@ const definitions: readonly OfficialVendor[] = [
         maxOutputTokens: 1_048_576,
         reasoningEffort: { supported: true, values: ['low', 'high', 'max'] }
       },
+      { id: 'kimi-k3', contextWindow: 1_000_000, maxOutputTokens: 1_048_576 },
       {
         id: 'kimi-k3.1-pro-highspeed',
         contextWindow: 1_048_576,
@@ -459,6 +596,9 @@ const definitions: readonly OfficialVendor[] = [
     chatCompletionsBaseUrl: 'https://api.kimi.com/coding/v1',
     apiKeyUrl: 'https://www.kimi.com/code/docs',
     models: [
+      // The coding subscription uses an unprefixed ID and grants up to 1M context by plan.
+      // https://www.kimi.com/code/docs/en/kimi-code/models.html
+      { id: 'k3.1-pro', contextWindow: 1_048_576 },
       {
         id: 'kimi-k3',
         contextWindow: 1_000_000,
@@ -467,12 +607,21 @@ const definitions: readonly OfficialVendor[] = [
       { id: 'kimi-for-coding', contextWindow: 1_048_576, maxOutputTokens: 32_768 },
       { id: 'kimi-for-coding-highspeed', contextWindow: 256_000, maxOutputTokens: 32_768 }
     ],
-    // Only the k3 model in this plan is vision-capable; the coding-tuned ids are text-only.
-    multimodal: { multimodalModels: ['kimi-k3', 'kimi-for-coding'] }
+    multimodal: { multimodalModels: ['k3.1-pro', 'kimi-k3', 'kimi-for-coding'] }
   },
   {
     id: 'minimax',
     label: 'MiniMax',
+    // Image hosts are independent of the region's chat API.
+    // https://platform.minimax.io/docs/guides/image-generation
+    // China endpoint verified against https://api.minimax.cn/v1/images/generations.
+    imageGeneration: {
+      regions: [
+        { id: 'global', baseUrl: 'https://api.minimax.io/v1' },
+        { id: 'china', baseUrl: 'https://api.minimax.cn/v1' }
+      ],
+      models: [{ id: 'MiniMax-H3-Image', label: 'MiniMax H3 Image' }]
+    },
     reasoningEffort: { supported: false },
     // MiniMax serves the Anthropic /v1/messages route under `/anthropic`, plus the OpenAI-compatible
     // /v1/chat/completions and OpenAI Responses /v1/responses under `/v1`, from a Global host (.io) and
@@ -482,6 +631,8 @@ const definitions: readonly OfficialVendor[] = [
     regions: [
       {
         id: 'global',
+        modelsListUrl: 'https://api.minimax.io/v1/models',
+        modelsList: bearerCatalog,
         label: 'Global',
         baseUrl: 'https://api.minimax.io/anthropic',
         chatCompletionsBaseUrl: 'https://api.minimax.io/v1',
@@ -489,6 +640,8 @@ const definitions: readonly OfficialVendor[] = [
       },
       {
         id: 'china',
+        modelsListUrl: 'https://api.minimax.cn/v1/models',
+        modelsList: bearerCatalog,
         label: 'China',
         baseUrl: 'https://api.minimaxi.com/anthropic',
         chatCompletionsBaseUrl: 'https://api.minimaxi.com/v1',
@@ -496,20 +649,19 @@ const definitions: readonly OfficialVendor[] = [
       }
     ],
     models: [
+      // M3.1 always thinks and supports five effort levels (default: max).
+      // https://platform.minimax.cn/docs/guides/text-generation
+      {
+        id: 'MiniMax-M3.1-Flash',
+        contextWindow: 1_000_000,
+        reasoningEffort: { supported: true, values: ['low', 'medium', 'high', 'xhigh', 'max'] }
+      },
       // MiniMax documents M3 reasoning as a binary thinking switch: none disables thinking and high
       // enables Adaptive Thinking. Older M2 models remain conservative until documented otherwise.
       {
         id: 'MiniMax-M3',
         contextWindow: 1_000_000,
         reasoningEffort: { supported: true, values: ['none', 'high'] }
-      },
-      // M3.1 always thinks and supports five effort levels (default: max). Keep M3 as the
-      // default and retain the Preview id for existing selections.
-      // https://platform.minimax.cn/docs/guides/text-generation
-      {
-        id: 'MiniMax-M3.1-Flash',
-        contextWindow: 1_000_000,
-        reasoningEffort: { supported: true, values: ['low', 'medium', 'high', 'xhigh', 'max'] }
       },
       {
         id: 'MiniMax-M3.1-Flash-Preview',
@@ -537,19 +689,21 @@ const definitions: readonly OfficialVendor[] = [
     regions: [
       {
         id: 'global',
+        modelsListUrl: 'https://api.stepfun.ai/v1/models',
+        modelsList: bearerCatalog,
         label: 'Global',
         baseUrl: 'https://api.stepfun.ai',
         chatCompletionsBaseUrl: 'https://api.stepfun.ai/v1',
-        apiKeyUrl: 'https://platform.stepfun.ai/interface-key',
-        modelsListUrl: 'https://api.stepfun.ai/v1/models'
+        apiKeyUrl: 'https://platform.stepfun.ai/interface-key'
       },
       {
         id: 'china',
+        modelsListUrl: 'https://api.stepfun.com/v1/models',
+        modelsList: bearerCatalog,
         label: 'China',
         baseUrl: 'https://api.stepfun.com',
         chatCompletionsBaseUrl: 'https://api.stepfun.com/v1',
-        apiKeyUrl: 'https://platform.stepfun.com/interface-key',
-        modelsListUrl: 'https://api.stepfun.com/v1/models'
+        apiKeyUrl: 'https://platform.stepfun.com/interface-key'
       }
     ],
     models: [
@@ -605,6 +759,8 @@ const definitions: readonly OfficialVendor[] = [
   },
   {
     id: 'xiaomimimo',
+    modelsListUrl: 'https://api.xiaomimimo.com/v1/models',
+    modelsList: bearerCatalog,
     label: 'Xiaomi MIMO',
     reasoningEffort: { supported: true, values: ['none', 'high'] },
     // Xiaomi MiMo exposes both routes: Anthropic /v1/messages under `/anthropic` and the OpenAI-compatible
@@ -613,7 +769,6 @@ const definitions: readonly OfficialVendor[] = [
     baseUrl: 'https://api.xiaomimimo.com/anthropic',
     chatCompletionsBaseUrl: 'https://api.xiaomimimo.com/v1',
     apiKeyUrl: 'https://platform.xiaomimimo.com/console/api-keys',
-    modelsListUrl: 'https://api.xiaomimimo.com/v1/models',
     models: [
       { id: 'mimo-v2.6-pro', contextWindow: 1_000_000, maxOutputTokens: 131_072 },
       { id: 'mimo-v2.6-flash', contextWindow: 1_000_000, maxOutputTokens: 131_072 },
@@ -642,6 +797,19 @@ const definitions: readonly OfficialVendor[] = [
       // Keep China first: pre-region provider records must retain their original endpoint.
       {
         id: 'china',
+        modelsListUrl: 'https://token.sensenova.cn/v1/models',
+        modelsList: {
+          ...bearerCatalog,
+          filter: { path: 'output_modalities', includes: 'text' },
+          fields: {
+            name: 'name',
+            contextWindow: 'context_length',
+            maxOutputTokens: 'max_output_length',
+            supportsImageInput: { path: 'input_modalities', includes: 'image' },
+            supportsTools: { path: 'supported_features', includes: 'tools' },
+            supportsReasoning: { path: 'supported_features', includes: 'reasoning' }
+          }
+        },
         label: 'China',
         baseUrl: 'https://token.sensenova.cn',
         chatCompletionsBaseUrl: 'https://token.sensenova.cn/v1',
@@ -649,6 +817,7 @@ const definitions: readonly OfficialVendor[] = [
       },
       {
         id: 'global',
+        modelsList: false,
         label: 'Global',
         baseUrl: 'https://token.sensenova.ai',
         chatCompletionsBaseUrl: 'https://token.sensenova.ai/v1',
@@ -672,6 +841,10 @@ const definitions: readonly OfficialVendor[] = [
   },
   {
     id: 'volcengine',
+    imageGeneration: {
+      regions: [{ id: 'china', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3' }],
+      models: [{ id: 'doubao-seedream-5-5-261028', label: 'Seedream 5.5' }]
+    },
     label: 'Volcengine Ark',
     reasoningEffort: { supported: true, values: ['minimal', 'low', 'medium', 'high'] },
     // ByteDance's Volcengine Ark serves all three routes on one host: the Anthropic-compatible
@@ -734,6 +907,8 @@ const definitions: readonly OfficialVendor[] = [
     regions: [
       {
         id: 'international',
+        modelsListUrl: 'https://tokenhub-intl.tencentcloudmaas.com/v1/models',
+        modelsList: { ...bearerCatalog, fields: { name: 'name', lifecycle: 'status' } },
         label: 'International (Singapore)',
         baseUrl: 'https://tokenhub-intl.tencentcloudmaas.com',
         chatCompletionsBaseUrl: 'https://tokenhub-intl.tencentcloudmaas.com/v1',
@@ -741,6 +916,8 @@ const definitions: readonly OfficialVendor[] = [
       },
       {
         id: 'china',
+        modelsListUrl: 'https://tokenhub.tencentmaas.com/v1/models',
+        modelsList: { ...bearerCatalog, fields: { name: 'name', lifecycle: 'status' } },
         label: 'China (Guangzhou)',
         baseUrl: 'https://tokenhub.tencentmaas.com',
         chatCompletionsBaseUrl: 'https://tokenhub.tencentmaas.com/v1',
@@ -818,6 +995,8 @@ const definitions: readonly OfficialVendor[] = [
   },
   {
     id: 'nvidia',
+    modelsListUrl: 'https://integrate.api.nvidia.com/v1/models',
+    modelsList: { ...publicCatalog, knownModelsOnly: true },
     label: 'NVIDIA',
     reasoningEffort: { supported: false },
     apiEndpoints: ['chat-completions'],
@@ -839,13 +1018,14 @@ const definitions: readonly OfficialVendor[] = [
   },
   {
     id: 'opencode-go',
+    modelsListUrl: 'https://opencode.ai/inference/go/v1/models',
+    modelsList: openCodeCatalog,
     label: 'OpenCode Go',
     reasoningEffort: { supported: false },
     apiEndpoints: ['chat-completions'],
     baseUrl: 'https://opencode.ai/zen/go/v1',
     apiKeyUrl: 'https://opencode.ai/zen',
-    // OpenCode documents one protocol per model. Keep the catalog bundled so deprecated and temporary
-    // free entries do not appear through the broader live model endpoint.
+    // Offline defaults. Online discovery can add new Go models with supported routes.
     models: [
       { id: 'kimi-k2.7-code', contextWindow: 262_144 },
       {
@@ -995,12 +1175,15 @@ const definitions: readonly OfficialVendor[] = [
   },
   {
     id: 'opencode',
+    modelsListUrl: 'https://opencode.ai/inference/v1/models',
+    modelsList: openCodeCatalog,
     label: 'OpenCode Zen',
     reasoningEffort: { supported: false },
     apiEndpoints: ['chat-completions'],
     baseUrl: 'https://opencode.ai/zen/v1',
     apiKeyUrl: 'https://opencode.ai/zen',
-    // Zen also mixes protocols. Exclude Google-native, deprecated, and explicitly
+    // Online discovery uses the protocols advertised for each Zen model.
+    // For the bundled defaults, exclude Google-native, deprecated, and explicitly
     // product-excluded models while preserving the existing Kimi default. Legacy lower-tier
     // models are not backfilled, and the transient limited-time free entries stay out (the
     // two grandfathered free models at the tail predate that policy).

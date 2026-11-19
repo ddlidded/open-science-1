@@ -1,6 +1,9 @@
+import { digestFileWithinBudget } from '../bounded-file-io'
 import { bindManagedPdfVersion } from '../pdf-annotations/source-bindings'
-import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import type { BigIntStats } from 'node:fs'
 
 import type { PrismaClient } from '@prisma/client'
 
@@ -21,7 +24,7 @@ import type {
   PublishCompatibilityRouting,
   StagingArtifactVersionRecord
 } from './provenance-version-writer'
-import { requireAgentArtifactVersion } from './provenance-version-kind'
+import { requireGeneratedArtifactVersion } from './provenance-version-kind'
 
 const SAFE_SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 // Reconciliation can also run from a read path while an active writer is between copying bytes and
@@ -87,6 +90,105 @@ const moveDirectoryIfPresent = async (source: string, destination: string): Prom
 export class ArtifactProvenanceStagingRecovery {
   constructor(private readonly options: ArtifactProvenanceStagingRecoveryOptions) {}
 
+  // Plan directory I/O outside the persistence barrier. The facade admits each action under
+  // artifact Session ownership; its caller additionally guards the complete Session snapshot.
+  async planOrphanStagingCleanup(
+    projectId: string,
+    appSessionId: string,
+    startupCutoff: number
+  ): Promise<Array<() => Promise<(() => Promise<void>) | undefined>>> {
+    const root = resolveStorageKey(
+      this.options.storageRoot,
+      storageKey('artifacts', projectId, appSessionId, '.provenance', '.staging', 'versions')
+    )
+    const candidates = await readdir(root, { withFileTypes: true }).catch((error: unknown) => {
+      if (errorCode(error) === 'ENOENT') return []
+      throw error
+    })
+    const client = await this.options.getClient()
+    const retiredRoot = join(dirname(root), '.retired-orphans')
+    const retiredRootInfo = await lstat(retiredRoot).catch((error: unknown) => {
+      if (errorCode(error) === 'ENOENT') return undefined
+      throw error
+    })
+    if (retiredRootInfo && (!retiredRootInfo.isDirectory() || retiredRootInfo.isSymbolicLink()))
+      throw new Error('Artifact retired staging path is unsafe.')
+    const retired = await readdir(retiredRoot, { withFileTypes: true }).catch((error: unknown) => {
+      if (errorCode(error) === 'ENOENT') return []
+      throw error
+    })
+    const actions: Array<() => Promise<(() => Promise<void>) | undefined>> = retired
+      .filter((entry) => entry.isDirectory() && /^[0-9a-f-]{36}$/.test(entry.name))
+      .map((entry) => async () => async () => {
+        await rm(join(retiredRoot, entry.name), { recursive: true, force: true })
+      })
+    for (const candidate of candidates) {
+      if (!candidate.isDirectory() || !SAFE_SEGMENT_PATTERN.test(candidate.name)) continue
+      const path = join(root, candidate.name)
+      const before = await lstat(path).catch((error: unknown) => {
+        if (errorCode(error) === 'ENOENT') return undefined
+        throw error
+      })
+      if (
+        !before?.isDirectory() ||
+        before.isSymbolicLink() ||
+        before.mtimeMs >= startupCutoff ||
+        before.ctimeMs >= startupCutoff ||
+        this.options.now().getTime() - before.mtimeMs < ORPHAN_STAGING_GRACE_MS
+      )
+        continue
+      if (
+        await client.artifactVersion.findUnique({
+          where: { id: candidate.name },
+          select: { id: true }
+        })
+      )
+        continue
+      await mkdir(retiredRoot, { recursive: true })
+      const retiredInfo = await lstat(retiredRoot)
+      if (!retiredInfo.isDirectory() || retiredInfo.isSymbolicLink())
+        throw new Error('Artifact retired staging path is unsafe.')
+      const retiredPath = join(retiredRoot, randomUUID())
+      actions.push(async () => {
+        // A Version may have acquired authority or replaced/touched its directory after planning.
+        // Neither case authorizes deleting the originally observed rowless staging candidate.
+        if (
+          await client.artifactVersion.findUnique({
+            where: { id: candidate.name },
+            select: { id: true }
+          })
+        )
+          return
+        const current = await lstat(path).catch((error: unknown) => {
+          if (errorCode(error) === 'ENOENT') return undefined
+          throw error
+        })
+        if (
+          !current?.isDirectory() ||
+          current.isSymbolicLink() ||
+          current.dev !== before.dev ||
+          current.ino !== before.ino ||
+          current.mtimeMs !== before.mtimeMs ||
+          current.ctimeMs !== before.ctimeMs ||
+          current.birthtimeMs !== before.birthtimeMs ||
+          current.mtimeMs >= startupCutoff ||
+          current.ctimeMs >= startupCutoff ||
+          this.options.now().getTime() - current.mtimeMs < ORPHAN_STAGING_GRACE_MS
+        )
+          return
+        // Atomic detachment is the only destructive action inside the catalog fence. Never copy
+        // on EXDEV/rename failure. The private namespace is rediscovered after interruption.
+        await rename(path, retiredPath)
+        await this.options.durability.syncDirectory(root)
+        await this.options.durability.syncDirectory(retiredRoot)
+        return async () => {
+          await rm(retiredPath, { recursive: true, force: true })
+        }
+      })
+    }
+    return actions
+  }
+
   routingPublisher(
     projectId: string,
     artifactStorageSessionId: string,
@@ -134,25 +236,31 @@ export class ArtifactProvenanceStagingRecovery {
     )
     const finalContentPath = resolveStorageKey(this.options.storageRoot, version.contentStorageKey)
     const finalDirectory = dirname(finalContentPath)
-    const [stagingContent, finalContent] = await Promise.all([
-      readOptionalFile(join(stagingDirectory, 'content')),
-      readOptionalFile(finalContentPath)
+    const findContent = (path: string): Promise<BigIntStats | undefined> =>
+      lstat(path, { bigint: true }).catch((error: unknown) => {
+        if (errorCode(error) === 'ENOENT') return undefined
+        throw error
+      })
+    const stagingContentPath = join(stagingDirectory, 'content')
+    const [stagingInfo, finalInfo] = await Promise.all([
+      findContent(stagingContentPath),
+      findContent(finalContentPath)
     ])
-    if (stagingContent && finalContent) {
+    if (stagingInfo && finalInfo) {
       throw new Error(`Artifact Version has conflicting staging and final content: ${version.id}`)
     }
-    const content = finalContent ?? stagingContent
-    if (!content) throw new Error(`Artifact Version staging content is unavailable: ${version.id}`)
-    if (content.byteLength !== Number(version.sizeBytes) || sha256(content) !== version.checksum) {
-      throw new Error(`Artifact Version staging content is corrupt: ${version.id}`)
-    }
+    const info = finalInfo ?? stagingInfo
+    if (!info) throw new Error(`Artifact Version staging content is unavailable: ${version.id}`)
+    const corruptMessage = `Artifact Version staging content is corrupt: ${version.id}`
+    if (!info.isFile() || info.size !== version.sizeBytes) throw new Error(corruptMessage)
 
-    const publishDirectory = finalContent ? finalDirectory : stagingDirectory
-    await this.syncAndVerifyFile(
-      join(publishDirectory, 'content'),
-      version.checksum,
-      `Artifact Version staging content is corrupt: ${version.id}`
-    )
+    const contentPath = finalInfo ? finalContentPath : stagingContentPath
+    const publishDirectory = dirname(contentPath)
+    await this.options.durability.syncFile(contentPath)
+    const expectedSize = Number(version.sizeBytes)
+    const digest = await digestFileWithinBudget(contentPath, expectedSize)
+    if (digest.sizeBytes !== expectedSize || digest.checksum !== version.checksum)
+      throw new Error(corruptMessage)
     await this.ensureCanonicalMirror(
       join(publishDirectory, 'evidence.json'),
       version.evidenceJson,
@@ -172,7 +280,7 @@ export class ArtifactProvenanceStagingRecovery {
       )
     }
 
-    if (!finalContent) {
+    if (!finalInfo) {
       await mkdir(dirname(finalDirectory), { recursive: true })
       await this.options.durability.syncDirectory(stagingDirectory)
       await rename(stagingDirectory, finalDirectory)
@@ -229,7 +337,7 @@ export class ArtifactProvenanceStagingRecovery {
       return updated
     })
     return this.options.projectVersionFile(
-      requireAgentArtifactVersion(recovered),
+      requireGeneratedArtifactVersion(recovered),
       projectId,
       appSessionId
     )
@@ -258,7 +366,7 @@ export class ArtifactProvenanceStagingRecovery {
         },
         include: { artifact: true }
       })
-      .then((rows) => rows.map(requireAgentArtifactVersion))
+      .then((rows) => rows.map(requireGeneratedArtifactVersion))
 
     // A crash can leave a complete staging row after its immutable bytes were copied but before the
     // final state update. Resume those rows from SQLite authority before scanning unindexed folders.

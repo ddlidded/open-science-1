@@ -1,3 +1,7 @@
+import { readPersistedFailure } from '../../shared/session-persistence/turn-outcome'
+import { ScheduleMcp } from '../schedules/mcp'
+import type { ScheduleManagement } from '../schedules/management'
+import { SCHEDULE_TURN_META, type ScheduleCreateRequest } from '../../shared/session-schedules'
 import * as acp from '@agentclientprotocol/sdk'
 import { createServer, type ServerResponse } from 'node:http'
 import { once } from 'node:events'
@@ -169,7 +173,9 @@ async function modelServer(
     for await (const chunk of request) chunks.push(Buffer.from(chunk))
     const body = JSON.parse(Buffer.concat(chunks).toString()) as WireRequest
     requests.push(body)
-    expect(request.headers.authorization).toBe('Bearer local-test-token')
+    if (request.url?.endsWith('/messages'))
+      expect(request.headers['x-api-key']).toBe('local-test-token')
+    else expect(request.headers.authorization).toBe('Bearer local-test-token')
     response.writeHead(200, { 'content-type': 'text/event-stream' })
     if (reply) reply(body, response)
     else finish(response, 'answer')
@@ -210,7 +216,7 @@ function finish(
 async function fixture(
   endpoint: string,
   existing?: string,
-  allow = true,
+  allow: boolean | (() => Promise<boolean>) = true,
   contextWindow = 32768,
   inputCapabilities?: { images?: boolean; files?: boolean; audio?: boolean; video?: boolean },
   token = 'local-test-token'
@@ -232,7 +238,7 @@ async function fixture(
     .onNotification(acp.methods.client.session.update, (context) => {
       updates.push(context.params)
     })
-    .onRequest(acp.methods.client.session.requestPermission, (context) => {
+    .onRequest(acp.methods.client.session.requestPermission, async (context) => {
       expect(
         updates.some(
           ({ sessionId, update }) =>
@@ -243,7 +249,8 @@ async function fixture(
         )
       ).toBe(true)
       approvals.push(context.params)
-      return { outcome: { outcome: 'selected', optionId: allow ? 'allow' : 'deny' } }
+      const approved = typeof allow === 'function' ? await allow() : allow
+      return { outcome: { outcome: 'selected', optionId: approved ? 'allow' : 'deny' } }
     })
     .connect(owner.app)
   cleanup.push(async () => {
@@ -299,7 +306,8 @@ async function mcpServer(
   disconnectAfterCall = false,
   waitForCall?: Promise<void>,
   image = false,
-  outputText = 'receipt'
+  outputText = 'receipt',
+  nestedInput = false
 ): Promise<{ config: acp.McpServer; calls: string[] }> {
   const calls: string[] = []
   const http = createServer(async (request, response) => {
@@ -311,7 +319,11 @@ async function mcpServer(
           description: 'Append a receipt',
           inputSchema: {
             type: 'object',
-            properties: { value: { type: 'integer' } },
+            properties: {
+              value: nestedInput
+                ? { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] }
+                : { type: 'integer' }
+            },
             required: ['value'],
             additionalProperties: false
           }
@@ -415,6 +427,28 @@ it('sends task-only instructions without a tool catalog on the provider wire', a
   expect(JSON.stringify(model.requests[0].messages)).toContain('Translate faithfully.')
 })
 
+it.each(['max_tokens', 'model_context_window_exceeded'])(
+  'reports a Messages %s stop as output truncation to the host',
+  async (reason) => {
+    const model = await modelServer((_body, response) => {
+      const events = [
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },
+        { type: 'message_delta', delta: { stop_reason: reason } },
+        { type: 'message_stop' }
+      ]
+      response.end(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''))
+    })
+    const a = await fixture(model.endpoint.replace('/chat/completions', '/messages'))
+    const { sessionId } = await a.connection.agent.request(acp.methods.agent.session.new, {
+      cwd: a.directory,
+      mcpServers: []
+    })
+
+    expect((await prompt(a.connection, sessionId)).stopReason).toBe('max_tokens')
+    expect(model.requests).toHaveLength(1)
+  }
+)
+
 it('uses the package across turns and resumes durable history without replay duplication', async () => {
   const model = await modelServer()
   const a = await fixture(model.endpoint)
@@ -455,32 +489,46 @@ it('uses the package across turns and resumes durable history without replay dup
   ).rejects.toThrow()
 })
 
-it('reports missing MCP fields without reflecting input values and recovers on the next step', async () => {
-  const managed = await mcpServer()
-  let requests = 0
-  const model = await modelServer((body, response) => {
-    requests++
-    if (requests === 1)
-      finish(response, '', body.tools![0].function.name, { private: 'do-not-reflect-this' })
-    else if (requests === 2) {
-      const diagnostic = JSON.stringify(body.messages.at(-1))
-      expect(diagnostic).toContain('$.value: expected required field')
-      expect(diagnostic).not.toContain('do-not-reflect-this')
-      finish(response, '', body.tools![0].function.name, { value: 1 })
-    } else finish(response, 'done')
-  })
-  const f = await fixture(model.endpoint)
-  const { sessionId } = await f.connection.agent.request(acp.methods.agent.session.new, {
-    cwd: f.directory,
-    mcpServers: [managed.config]
-  })
-  expect((await prompt(f.connection, sessionId)).stopReason).toBe('end_turn')
-  expect(requests).toBe(3)
-  expect(managed.calls).toEqual(['append'])
-  expect(f.approvals).toHaveLength(1)
-  expect(model.requests[1].tools).toEqual(model.requests[0].tools)
-  expect(model.requests[2].tools).toEqual(model.requests[0].tools)
-})
+it.each([false, true])(
+  'reports missing MCP fields without reflecting input values and recovers (nested=%s)',
+  async (nested) => {
+    const managed = await mcpServer(false, undefined, false, 'receipt', nested)
+    let requests = 0
+    const model = await modelServer((body, response) => {
+      requests++
+      if (requests === 1)
+        finish(
+          response,
+          '',
+          body.tools![0].function.name,
+          nested
+            ? { value: { private: 'do-not-reflect-this' } }
+            : { private: 'do-not-reflect-this' }
+        )
+      else if (requests === 2) {
+        const diagnostic = JSON.stringify(body.messages.at(-1))
+        expect(diagnostic).toContain(
+          `${nested ? '$.value.name' : '$.value'}: expected required field`
+        )
+        expect(diagnostic).not.toContain('do-not-reflect-this')
+        finish(response, '', body.tools![0].function.name, {
+          value: nested ? { name: 'Receipt' } : 1
+        })
+      } else finish(response, 'done')
+    })
+    const f = await fixture(model.endpoint)
+    const { sessionId } = await f.connection.agent.request(acp.methods.agent.session.new, {
+      cwd: f.directory,
+      mcpServers: [managed.config]
+    })
+    expect((await prompt(f.connection, sessionId)).stopReason).toBe('end_turn')
+    expect(requests).toBe(3)
+    expect(managed.calls).toEqual(['append'])
+    expect(f.approvals).toHaveLength(1)
+    expect(model.requests[1].tools).toEqual(model.requests[0].tools)
+    expect(model.requests[2].tools).toEqual(model.requests[0].tools)
+  }
+)
 
 it.each([true, false])('routes MCP through host permission, allow=%s', async (allow) => {
   const managed = await mcpServer()
@@ -1227,6 +1275,35 @@ it('carries native PDF, audio and explicitly supported video across the ACP host
   ])
 })
 
+it('accepts ACP resource links as model-visible references without resolving them', async () => {
+  const model = await modelServer()
+  const f = await fixture(model.endpoint)
+  const { sessionId } = await f.connection.agent.request(acp.methods.agent.session.new, {
+    cwd: f.directory,
+    mcpServers: []
+  })
+  await f.connection.agent.request(acp.methods.agent.session.prompt, {
+    sessionId,
+    prompt: [
+      { type: 'text', text: 'Inspect these references' },
+      {
+        type: 'resource_link',
+        uri: 'file:///private/evidence/report.csv',
+        name: 'report.csv',
+        title: 'Report',
+        mimeType: 'text/csv',
+        size: 42
+      },
+      { type: 'resource_link', uri: 'file:///private/evidence/notes.txt', name: '' },
+      { type: 'resource_link', uri: 'https://example.test/reference.pdf', name: '' }
+    ]
+  })
+  expect(model.requests[0].messages.at(-1)?.content).toBe(
+    'Inspect these references\n[@report.csv](file:///private/evidence/report.csv)\n' +
+      '[@notes.txt](file:///private/evidence/notes.txt)\nhttps://example.test/reference.pdf'
+  )
+})
+
 it('rejects model-disabled media before provider I/O and allows a subsequent text turn', async () => {
   const model = await modelServer()
   const f = await fixture(model.endpoint, undefined, true, 32768, { audio: false })
@@ -1295,13 +1372,15 @@ it.each([
   }
 )
 
-it('preserves the baseline generic HTTP failure instead of newly labeling quota as temporary throttling', async () => {
+it('classifies HTTP quota rejection as billing while retaining bounded diagnostics', async () => {
   const server = createServer(async (request, response) => {
     request.resume()
     await once(request, 'end')
     response.writeHead(429, { 'content-type': 'application/json' })
     response.end(
-      JSON.stringify({ error: { code: 'insufficient_quota', message: 'private account' } })
+      JSON.stringify({
+        error: { code: 'insufficient_quota', message: 'private account and token must not escape' }
+      })
     )
   })
   server.listen(0, '127.0.0.1')
@@ -1317,9 +1396,290 @@ it('preserves the baseline generic HTTP failure instead of newly labeling quota 
   })
   const failure = await prompt(f.connection, sessionId).catch((error: unknown) => error)
   expect(failure).toBeInstanceOf(Error)
-  expect(failure).not.toHaveProperty('data.errorName', 'APIError')
-  expect(classifyFailure(collectPromptFailureFacts(failure)).reason).not.toBe(
-    'service/rate-limited'
-  )
+  expect(failure).toHaveProperty('data.errorName', 'APIError')
+  expect(classifyFailure(collectPromptFailureFacts(failure)).reason).toBe('configuration/billing')
   expect(JSON.stringify(failure)).not.toContain('private account')
 })
+
+it('injects Schedule identity outside model arguments and fences a cancelled permission wait', async () => {
+  const create = vi.fn(async (request: ScheduleCreateRequest) => ({
+    id: 'job',
+    revision: 1,
+    draft: request.draft
+  }))
+  const schedules = new ScheduleMcp({ create } as unknown as ScheduleManagement)
+  const host = new AgentMcpHttpHost()
+  const { token } = await host.ensureStarted()
+  cleanup.push(() => host.close())
+  const url = host.registerSchedule('route', (owns) => schedules.server('p', owns, true))
+  const target = { projectId: 'p', sessionId: 's', agentFrameId: 'f', messageBranchId: 'b' }
+  const first = schedules.open({ target, promptMessageId: 'first', isCurrent: () => true })
+  const permission = Promise.withResolvers<boolean>()
+  let approved = false
+  const model = await modelServer((body, response) => {
+    expect(JSON.stringify(body.messages)).not.toContain('schedule-turn-')
+    const tool = body.tools!.find((t) => t.function.name.endsWith('__create_schedule'))!
+    expect(JSON.stringify(tool)).not.toContain('"turnRef"')
+    expect(JSON.stringify(tool)).not.toContain('"requestId"')
+    if (body.messages.at(-1)?.role === 'user')
+      finish(response, '', tool.function.name, {
+        name: 'Review',
+        message: 'Review progress',
+        rule: { kind: 'once', at: Date.now() + 60000 }
+      })
+    else finish(response, 'done')
+  })
+  const f = await fixture(model.endpoint, undefined, () =>
+    approved ? Promise.resolve(true) : permission.promise
+  )
+  const { sessionId } = await f.connection.agent.request(acp.methods.agent.session.new, {
+    cwd: f.directory,
+    mcpServers: [
+      {
+        type: 'http',
+        name: 'open-science-schedule',
+        url,
+        headers: [{ name: 'authorization', value: `Bearer ${token}` }]
+      }
+    ]
+  })
+  const run = (ref?: string): Promise<acp.PromptResponse> =>
+    f.connection.agent.request(acp.methods.agent.session.prompt, {
+      sessionId,
+      prompt: [
+        {
+          type: 'text',
+          text: 'Create the task',
+          ...(ref ? { _meta: { [SCHEDULE_TURN_META]: ref } } : {})
+        }
+      ]
+    })
+  const pending = run(first.ref)
+  await vi.waitFor(() => expect(f.approvals).toHaveLength(1))
+  expect(f.approvals[0].toolCall.rawInput).toMatchObject({
+    name: 'Review',
+    message: 'Review progress'
+  })
+  expect(f.approvals[0].toolCall.rawInput).not.toHaveProperty('turnRef')
+  await f.connection.agent.notify(acp.methods.agent.session.cancel, { sessionId })
+  first.close()
+  permission.resolve(true)
+  expect((await pending).stopReason).toBe('cancelled')
+  expect(create).not.toHaveBeenCalled()
+  approved = true
+  const second = schedules.open({ target, promptMessageId: 'second', isCurrent: () => true })
+  expect((await run(second.ref)).stopReason).toBe('end_turn')
+  expect(create).toHaveBeenCalledTimes(1)
+  expect(create.mock.calls[0][0]).toMatchObject({
+    target,
+    requestId: expect.stringMatching(/^host-[a-f0-9]{64}$/),
+    draft: { action: { kind: 'send_session_message', message: 'Review progress' } }
+  })
+  expect((await run(first.ref)).stopReason).toBe('end_turn')
+  expect(create).toHaveBeenCalledTimes(1)
+  const approvals = f.approvals.length
+  expect((await run()).stopReason).toBe('end_turn')
+  expect(f.approvals).toHaveLength(approvals)
+  expect(create).toHaveBeenCalledTimes(1)
+})
+
+for (const protocol of ['chat-completions', 'responses', 'messages'] as const) {
+  it.each([
+    [400, 'model_unavailable', 'Model is unavailable', 'configuration/model-unavailable'],
+    [401, 'authentication_error', 'Invalid API key', 'configuration/auth-failed'],
+    [403, 'permission_denied', 'Access denied', 'configuration/auth-failed'],
+    [429, 'rate_limit_exceeded', 'Too many requests', 'service/rate-limited'],
+    [503, 'server_error', 'Model service unavailable', 'service/unavailable']
+  ] as const)(
+    `${protocol} transports HTTP %i through ACP and the persisted failure`,
+    async (status, code, message, reason) => {
+      const server = createServer(async (request, response) => {
+        request.resume()
+        await once(request, 'end')
+        response.writeHead(status, {
+          'content-type': 'application/json',
+          'x-request-id': 'provider-request-123'
+        })
+        response.end(
+          JSON.stringify({ error: { code, message }, credentials: 'PRIVATE_REQUEST_DATA' })
+        )
+      })
+      server.listen(0, '127.0.0.1')
+      await once(server, 'listening')
+      cleanup.push(async () => {
+        server.closeAllConnections()
+        await new Promise<void>((resolve) => server.close(() => resolve()))
+      })
+      const path = protocol === 'chat-completions' ? 'chat/completions' : protocol
+      const f = await fixture(
+        `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/${path}`
+      )
+      const { sessionId } = await f.connection.agent.request(acp.methods.agent.session.new, {
+        cwd: f.directory,
+        mcpServers: []
+      })
+      const failure = await prompt(f.connection, sessionId).catch((error: unknown) => error)
+      expect(failure).toMatchObject({
+        data: {
+          errorKind: 'provider-error',
+          protocol,
+          model: 'test',
+          status,
+          code:
+            status === 401 || status === 403
+              ? 'authentication_error'
+              : code === 'model_unavailable'
+                ? 'model_not_found'
+                : code,
+          requestId: 'provider-request-123',
+          phase: 'response'
+        }
+      })
+      const classified = classifyFailure(
+        collectPromptFailureFacts(failure, { providerName: 'Fixture Provider' })
+      )
+      expect(classified).toMatchObject({
+        reason,
+        diagnostics: {
+          protocol,
+          model: 'test',
+          provider: 'Fixture Provider',
+          status,
+          requestId: 'provider-request-123'
+        }
+      })
+      expect(readPersistedFailure({ failure: JSON.parse(JSON.stringify(classified)) })).toEqual(
+        classified
+      )
+      expect(JSON.stringify(failure)).not.toMatch(/PRIVATE_REQUEST_DATA|local-test-token/)
+      expect(JSON.stringify(failure)).not.toContain(message)
+      expect(classified.responseMessage).toBeUndefined()
+      expect(classified.diagnostics.raw).toBeUndefined()
+      const checkpoint = await createJournalAgentStore({
+        directory: join(f.directory, 'checkpoints')
+      }).load(sessionId)
+      expect(checkpoint?.requests.at(-1)?.status).toBe('failed')
+    }
+  )
+
+  it.each([
+    [400, 'text/plain', 'Model is unavailable', 'configuration/model-unavailable', 'response'],
+    [
+      404,
+      'application/json',
+      '{"error":{"code":"endpoint_not_found"}}',
+      'configuration/endpoint-invalid',
+      'response'
+    ],
+    [
+      503,
+      'text/html',
+      '<!doctype html><html><body>PRIVATE_GATEWAY_PAGE</body></html>',
+      'service/unavailable',
+      'response'
+    ],
+    [
+      200,
+      'application/json',
+      '{"error":{"code":"model_unavailable","message":"Model is unavailable"}}',
+      'configuration/model-unavailable',
+      'response'
+    ],
+    [200, 'text/event-stream', 'data: invalid-json\n\n', 'service/response-invalid', 'event-json'],
+    [
+      200,
+      'text/event-stream',
+      'data: {"type":"error","error":{"code":"new_provider_failure","message":"Request rejected"}}\n\n',
+      'service/provider-error',
+      'provider'
+    ]
+  ] as const)(
+    `${protocol} handles HTTP %i/%s without falling back to internal`,
+    async (status, contentType, body, reason, phase) => {
+      const server = createServer((request, response) => {
+        request.resume()
+        response.writeHead(status, { 'content-type': contentType, 'x-request-id': 'sse-request' })
+        response.end(body)
+      })
+      server.listen(0, '127.0.0.1')
+      await once(server, 'listening')
+      cleanup.push(async () => {
+        server.closeAllConnections()
+        await new Promise<void>((resolve) => server.close(() => resolve()))
+      })
+      const path = protocol === 'chat-completions' ? 'chat/completions' : protocol
+      const f = await fixture(
+        `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/${path}`
+      )
+      const { sessionId } = await f.connection.agent.request(acp.methods.agent.session.new, {
+        cwd: f.directory,
+        mcpServers: []
+      })
+      const failure = await prompt(f.connection, sessionId).catch((error: unknown) => error)
+      const classified = classifyFailure(collectPromptFailureFacts(failure))
+      expect(classified).toMatchObject({
+        reason,
+        diagnostics: {
+          protocol,
+          phase,
+          requestId: 'sse-request',
+          ...(phase === 'response' ? { status } : {})
+        }
+      })
+      expect(JSON.stringify(classified)).not.toContain('PRIVATE_GATEWAY_PAGE')
+    }
+  )
+}
+
+it.each([401, 403, 404, 413])(
+  'restores upstream HTTP %i through the actual forwarding bridge',
+  async (status) => {
+    const server = createServer((request, response) => {
+      request.resume()
+      response.writeHead(status, {
+        'content-type': 'application/json',
+        'request-id': 'bridge-request-123'
+      })
+      response.end(
+        JSON.stringify({
+          error: { message: status === 404 ? 'Model test does not exist' : 'Request rejected' }
+        })
+      )
+    })
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    cleanup.push(async () => {
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    })
+    const bridge = new ProtocolForwardingBridge(
+      [
+        {
+          id: 'fixture',
+          wire: 'chat-completions',
+          endpoint: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/chat/completions`,
+          model: 'test',
+          key: 'UPSTREAM_SECRET'
+        }
+      ],
+      'fixture'
+    )
+    const connection = await bridge.start()
+    cleanup.push(() => bridge.close())
+    const f = await fixture(
+      `${connection.baseUrl}/v1/chat/completions`,
+      undefined,
+      true,
+      32768,
+      undefined,
+      connection.token
+    )
+    const { sessionId } = await f.connection.agent.request(acp.methods.agent.session.new, {
+      cwd: f.directory,
+      mcpServers: []
+    })
+    const failure = await prompt(f.connection, sessionId).catch((error: unknown) => error)
+    expect(failure).toMatchObject({ data: { status, requestId: 'bridge-request-123' } })
+    expect(JSON.stringify(failure)).not.toContain('UPSTREAM_SECRET')
+  }
+)

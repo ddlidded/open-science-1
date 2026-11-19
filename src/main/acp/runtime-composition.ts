@@ -26,7 +26,7 @@ import {
 } from '../../shared/lifecycle-events'
 import type { ShellRuntimeBinding } from '../../shared/notebook'
 import type { PersistedChatSession } from '../../shared/session-persistence'
-import { CODEX_SUBSCRIPTION_PROVIDER_ID } from '../../shared/settings'
+import { CODEX_SUBSCRIPTION_PROVIDER_ID } from '../../shared/settings-runtime'
 import { filterSpecialistConnectorSkills } from '../../shared/specialist'
 import { imageAttachmentMimeType } from '../../shared/uploads'
 import type { ResolvedAgentBackend } from '../agent-framework'
@@ -42,10 +42,8 @@ import type { LiteratureAttachmentAuthority } from '../literature/attachment-aut
 import type { LiteratureCatalog } from '../literature/catalog'
 import { LiteratureCitationDocument } from '../literature/citation-document'
 import type { LiteratureDocumentReader } from '../literature/document-reader'
-import {
-  LITERATURE_LIBRARY_SEARCH_DEFAULT_LIMIT,
-  type LiteratureLibraryScope
-} from '../literature/library-mcp-server'
+import { LITERATURE_LIBRARY_SEARCH_DEFAULT_LIMIT } from '../literature/library-mcp-contract'
+import type { LiteratureLibraryScope } from '../literature/library-mcp-contract'
 import type { PdfElementTools } from '../literature/pdf-structure/agent-reader'
 import type { GrantedLocalRootsRepository } from '../local-fs/granted-roots-repository'
 import { netFetchStandard } from '../network-fetch'
@@ -139,6 +137,7 @@ type AcpRuntimeArtifacts = {
 }
 
 type AcpRuntimeCompositionOptions = AcpRuntimeArtifacts & {
+  schedules?: import('../schedules/mcp').ScheduleMcp
   appVersion: string
   mcpEntryPath: string
   uploadRepository: UploadRepository
@@ -175,6 +174,7 @@ type AcpRuntimeCompositionOptions = AcpRuntimeArtifacts & {
     import('../managed-file-versions/service').ManagedFileVersionService,
     'openLatest' | 'openVersion' | 'openUnpublishedVersion'
   >
+  pptxAgent?: import('../pptx-edit/agent-handler').PptxAgentHandler
   onSessionTurnStarted?: (sessionId: string, turnToken: string) => void
   onSessionTurnEnded?: (sessionId: string, turnToken: string) => void
   onSkillImportAttachmentEligible?: (
@@ -263,12 +263,14 @@ const isPdfAttachmentVersion = (version: { filename: string; contentType: string
 
 // Composes the compatibility façade while the coordinator remains the cross-generation Session owner.
 const createAcpRuntime = ({
+  schedules,
   appVersion,
   mcpEntryPath,
   repository,
   runRegistry,
   provenanceRepository,
   managedFileVersions,
+  pptxAgent,
   uploadRepository,
   notebookRpcServer,
   wslSetupSessions,
@@ -359,8 +361,8 @@ const createAcpRuntime = ({
               scope.projectId,
               scope.sessionId
             ),
-          mutateSession: (scope, mutate, onJsonCommitted) =>
-            sessionPersistenceCoordinator.mutateRuntimeSession(scope, mutate, onJsonCommitted),
+          mutateSession: (scope, mutate, options) =>
+            sessionPersistenceCoordinator.mutateRuntimeSession(scope, mutate, options),
           finalizeArtifacts: finalizeRuntimeArtifacts,
           onTerminalCommitExhausted: (_scope, event, retry, waitForWriteRelease) =>
             sessionPersistenceCoordinator.recordRuntimeTerminalFailure?.(
@@ -496,10 +498,12 @@ const createAcpRuntime = ({
         ...(spawnAgent ? { spawnAgent } : {}),
         ...(spawnProcess ? { spawnProcess } : {}),
         ...(registerOpenCodeStoreRelease ? { registerOpenCodeStoreRelease } : {}),
+        schedules: delegatedNotebookConnection ? undefined : schedules,
         mcpHttpHost: new AgentMcpHttpHost({
           receiptDirectory: join(dataRoot, 'open-science-agent', 'tool-receipts')
         }),
         wslSetupSessions,
+        ...(pptxAgent ? { pptx: { agent: pptxAgent } } : {}),
         ...(literatureReader && literatureAttachments && sessionPersistenceCoordinator
           ? {
               literature: {
@@ -777,6 +781,13 @@ const createAcpRuntime = ({
                 dataRoot,
                 projectId: DEFAULT_ARTIFACT_PROJECT_ID,
                 mcpEntryPath,
+                enableImageGeneration: true,
+                imageMcp: {
+                  getPresetId: () =>
+                    settingsService.imageModels
+                      .resolve()
+                      .then((resolved) => resolved?.model.presetId)
+                },
                 repository,
                 runRegistry,
                 provenance: provenanceRepository,

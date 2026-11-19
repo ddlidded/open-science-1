@@ -1,5 +1,6 @@
 import type { PackageFileSelection } from '../../shared/session-package'
 import { randomUUID } from 'node:crypto'
+import { withImageTaskSnapshot } from '../image-model/stored-tasks'
 import { createLogger } from '@aipoch/diagnostics/node'
 import {
   startDiagnosticOperation,
@@ -154,6 +155,7 @@ export class SessionPackageOperation {
     const current = this.current!
     return {
       state: current.state,
+      ...(current.progress.importStage ? { importStage: current.progress.importStage } : {}),
       cleanupPending: Boolean(current.cleanupPending),
       completedBytes: current.progress.completedBytes,
       totalBytes: current.progress.totalBytes,
@@ -485,7 +487,9 @@ export class SessionPackageOperation {
       settled = resolve
     })
     try {
-      const result = await work(controller.signal)
+      const result = await (kind === 'export' || kind === 'fork'
+        ? withImageTaskSnapshot(() => work(controller.signal))
+        : work(controller.signal))
       this.current = {
         ...this.current!,
         state: 'succeeded',

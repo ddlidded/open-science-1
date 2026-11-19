@@ -31,6 +31,7 @@ import type { AcpCreateSessionResponse, AcpStateSnapshot } from '../../shared/ac
 import type { AcpRuntimeOptions } from '../acp/runtime'
 import { SideChatRelayOwner } from '../acp/side-chat-relay-owner'
 import type { AgentModelConfig, ResolvedAgentBackend } from '../agent-framework'
+import { codeBuddyFramework } from '../agent-framework/codebuddy'
 import { claudeCodeFramework } from '../agent-framework/claude-code'
 import { codexFramework } from '../agent-framework/codex'
 import { opencodeFramework } from '../agent-framework/opencode'
@@ -308,6 +309,31 @@ describe('Side chat restricted backend profile', () => {
         }
       }
     })
+  })
+
+  it('preserves the regional subscription login and disables native tools in a Side chat', async () => {
+    temporaryRoot = await mkdtemp(join(tmpdir(), 'codebuddy-side-chat-'))
+    const source = join(temporaryRoot, 'account')
+    await mkdir(source)
+    await writeFile(join(source, 'settings.json'), '{}')
+    const prepared = await prepareSideChatBackend(
+      {
+        ...backend(codeBuddyFramework, {
+          HOME: source,
+          USERPROFILE: source,
+          CODEBUDDY_CONFIG_DIR: source,
+          CODEBUDDY_INTERNET_ENVIRONMENT: 'external'
+        }),
+        modelRoute: 'codebuddy-subscription',
+        args: ['--tools', 'Read,Write']
+      },
+      join(temporaryRoot, 'chat')
+    )
+    expect(prepared.env.CODEBUDDY_CONFIG_DIR).toBe(
+      join(temporaryRoot, 'chat', 'codebuddy', 'external')
+    )
+    expect(prepared.env.HOME).toBe(source)
+    expect(prepared.args).toEqual(['--tools', ''])
   })
 
   it('keeps Claude resumable with no built-in tool-loading surface', async () => {
@@ -1109,6 +1135,66 @@ describe('SideChatRuntimeOwner lifecycle', () => {
     expect(deleteSession).toHaveBeenCalledWith({ sessionId: 'side-session-starting' })
     expect(shutdownForQuit).toHaveBeenCalledOnce()
   })
+
+  it.each([false, true])(
+    'drains sibling cleanup after deletion fails (separate parents: %s)',
+    async (separateParents) => {
+      temporaryRoot = await mkdtemp(join(tmpdir(), 'side-chat-deletion-drain-'))
+      const gate = deferred<void>()
+      const started = deferred<void>()
+      const profileRoot = join(temporaryRoot, 'runtime-support', 'side-chat')
+      profileRemoval.failPath = join(profileRoot, 'side-chat-failed')
+      profileRemoval.path = join(profileRoot, 'side-chat-blocked')
+      profileRemoval.wait = async () => {
+        started.resolve()
+        await gate.promise
+      }
+      await mkdir(profileRemoval.failPath, { recursive: true })
+      await mkdir(profileRemoval.path, { recursive: true })
+      const owner = new SideChatRuntimeOwner({
+        appVersion: 'test',
+        configRoot: temporaryRoot,
+        captureTarget: vi.fn(),
+        resolveTarget: vi.fn(),
+        relay: createRelayOwner(),
+        persistence: createPersistence(),
+        onEvent: vi.fn()
+      })
+      owner.hydrate(
+        ['side-chat-failed', 'side-chat-blocked'].map((id, index) => ({
+          projectId: 'project',
+          parentSessionId: separateParents ? `parent-${index}` : 'parent-0',
+          sideChat: {
+            version: 1,
+            id,
+            lifecycle: 'open',
+            frameworkId: 'claude-code',
+            historyPreamble: '',
+            entries: [],
+            createdAt: 1,
+            updatedAt: 1
+          }
+        }))
+      )
+      let settled = false
+      const cleanup = owner
+        .invalidateParents(['parent-0', ...(separateParents ? ['parent-1'] : [])])
+        .catch((error: unknown) => {
+          settled = true
+          return error
+        })
+      await started.promise
+      try {
+        await flushImmediate()
+        expect(settled).toBe(false)
+      } finally {
+        gate.resolve()
+      }
+      await expect(cleanup).resolves.toEqual(new Error('simulated profile removal failure'))
+      profileRemoval.failPath = ''
+      await owner.shutdown()
+    }
+  )
 
   it('rejects a preflighted start after authoritative parent deletion wins the race', async () => {
     temporaryRoot = await mkdtemp(join(tmpdir(), 'open-science-side-chat-invalid-parent-'))

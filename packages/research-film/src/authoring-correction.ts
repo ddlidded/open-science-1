@@ -15,17 +15,20 @@ export async function writeWithResearchFilmCorrection<T>(
   validate: (output: string) => T | Promise<T>,
   signal: AbortSignal,
   checkpoint?: FilmAuthoringCheckpoint,
-  key = 'screenplay'
+  key = 'screenplay',
+  feedback?: string
 ): Promise<T> {
   const saved = await checkpoint?.read(key)
-  if (saved !== undefined) {
+  if (saved !== undefined && !feedback) {
     try {
       return await validate(saved)
     } catch {
       signal.throwIfAborted()
     }
   }
-  let correction: ResearchFilmCorrection | undefined
+  let correction: ResearchFilmCorrection | undefined = feedback
+    ? { draft: saved ?? '', error: feedback }
+    : undefined
   for (let attempt = 0; ; attempt++) {
     signal.throwIfAborted()
     let parsed: T
@@ -41,11 +44,12 @@ export async function writeWithResearchFilmCorrection<T>(
       correction = {
         draft: incomplete ? '' : output!,
         error: incomplete
-          ? 'The previous response was incomplete. Return a substantially shorter, complete replacement. Simplify presentation and code, preserve evidence and qualifications, and omit commentary. Do not continue the partial response.'
+          ? 'The previous response was incomplete. Return a complete replacement. Simplify presentation and code where possible, preserve evidence and qualifications, and omit commentary. Do not continue the partial response.'
           : error instanceof Error
             ? error.message
             : String(error)
       }
+      if (feedback) correction.error += `\nHTML review: ${feedback}`
       continue
     }
     await checkpoint?.save(key, output!)

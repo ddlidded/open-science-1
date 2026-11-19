@@ -18,11 +18,12 @@ import {
 } from '../../shared/conversation-graph'
 import type {
   ArtifactMessageSnapshotFile,
+  ArtifactVersionEvidence,
   ProvenanceMessage,
   ProvenanceMessagePart
 } from '../../shared/artifact-provenance'
 import { defaultFileDurability, type FileDurability } from '@aipoch/durable-files'
-import { requireAgentArtifactVersion } from './provenance-version-kind'
+import { requireGeneratedArtifactVersion } from './provenance-version-kind'
 
 type ProvenanceMessageSnapshotOptions = {
   storageRoot: string
@@ -433,8 +434,8 @@ class ProvenanceMessageSnapshotRepository {
       return { kind: 'ordinary', projectId: session.projectId, sessionId: session.id }
     }
 
-    // The live graph is the final opportunity to freeze branch-scoped Messages. Deletion fails
-    // closed if any finalized output cannot be linked to immutable Message evidence.
+    // Freeze conversational outputs before removing the live graph. Independent edits retain
+    // their own connector evidence and never have a Message snapshot.
     await this.captureFinalizedMessages(session)
     const finalizedVersions = (
       await client.artifactVersion.findMany({
@@ -445,14 +446,31 @@ class ProvenanceMessageSnapshotRepository {
         },
         include: { messageSnapshot: true }
       })
-    ).map(requireAgentArtifactVersion)
-    if (finalizedVersions.some((version) => !version.messageSnapshot)) {
-      throw new Error(
-        'Session deletion requires Message snapshots for every finalized Artifact Version.'
-      )
-    }
+    ).map(requireGeneratedArtifactVersion)
     for (const version of finalizedVersions) {
-      if (!version.messageSnapshot) continue
+      if (version.promptMessageId === null && version.runtimeSegmentId === null) {
+        const evidence = JSON.parse(version.evidenceJson) as ArtifactVersionEvidence
+        if (
+          version.messageId !== null ||
+          version.messageSnapshotId !== null ||
+          sha256(version.evidenceJson) !== version.evidenceChecksum ||
+          evidence.project_id !== session.projectId ||
+          evidence.app_session_id !== session.id ||
+          evidence.artifact_id !== version.artifactId ||
+          evidence.version_id !== version.id ||
+          evidence.conversation.root_frame_id !== version.rootFrameId ||
+          evidence.conversation.agent_frame_id !== version.agentFrameId ||
+          evidence.conversation.message_branch_id !== version.messageBranchId
+        ) {
+          throw new Error('Session deletion requires valid image task provenance.')
+        }
+        continue
+      }
+      if (!version.messageSnapshot) {
+        throw new Error(
+          'Session deletion requires Message snapshots for every finalized Artifact Version.'
+        )
+      }
       await this.verifyReadySnapshot(version.messageSnapshot, {
         rootFrameId: version.rootFrameId,
         agentFrameId: version.agentFrameId,
@@ -616,26 +634,65 @@ class ProvenanceMessageSnapshotRepository {
     await this.reconcileSessionCleanup(activeSessions)
   }
 
+  async reconcileSessionMessageSnapshots(session: PersistedChatSession): Promise<void> {
+    await this.recoverStagingMessageSnapshots({
+      projectId: session.projectId,
+      sessionId: session.id
+    })
+    await this.repairReadyMessageSnapshots([session])
+  }
+
   async reconcileMessageSnapshots(activeSessions: PersistedChatSession[]): Promise<void> {
     await this.recoverStagingMessageSnapshots()
     await this.repairReadyMessageSnapshots(activeSessions)
   }
 
-  async reconcileSessionCleanup(activeSessions: PersistedChatSession[]): Promise<void> {
+  async planSessionCleanup(
+    activeSessions: readonly Pick<PersistedChatSession, 'projectId' | 'id'>[]
+  ): Promise<Array<{ projectId: string; sessionId: string; apply(): Promise<void> }>> {
     const client = await this.options.getClient()
-    await this.recoverStagingReviewScopeSnapshots()
+    // Include retained/deleted origins: their immutable Review evidence outlives Session JSON.
+    const identities = await client.review.findMany({
+      select: { projectId: true, sessionId: true },
+      distinct: ['projectId', 'sessionId']
+    })
+    identities.push(
+      ...(await client.fileOriginSession.findMany({
+        where: { state: 'deleting' },
+        select: { projectId: true, sessionId: true }
+      }))
+    )
+    const unique = new Map(
+      identities.map((identity) => [`${identity.projectId}\0${identity.sessionId}`, identity])
+    )
+    return [...unique.values()].map((identity) => ({
+      ...identity,
+      apply: () => this.reconcileSessionCleanup(activeSessions, identity)
+    }))
+  }
+
+  async reconcileSessionCleanup(
+    activeSessions: readonly Pick<PersistedChatSession, 'projectId' | 'id'>[],
+    identity?: { projectId: string; sessionId: string }
+  ): Promise<void> {
+    const client = await this.options.getClient()
+    await this.recoverStagingReviewScopeSnapshots(identity)
     const activeKeys = new Set(
       activeSessions.map((session) => `${session.projectId}\0${session.id}`)
     )
     const deletingOrigins = await client.fileOriginSession.findMany({
-      where: { state: 'deleting' }
+      where: { state: 'deleting', ...identity }
     })
     const [reviewSessions, origins] = await Promise.all([
       client.review.findMany({
+        where: identity,
         select: { projectId: true, sessionId: true },
         distinct: ['projectId', 'sessionId']
       }),
-      client.fileOriginSession.findMany({ select: { projectId: true, sessionId: true } })
+      client.fileOriginSession.findMany({
+        where: identity,
+        select: { projectId: true, sessionId: true }
+      })
     ])
     const originKeys = new Set(origins.map((origin) => `${origin.projectId}\0${origin.sessionId}`))
 
@@ -686,10 +743,13 @@ class ProvenanceMessageSnapshotRepository {
     })
   }
 
-  private async recoverStagingMessageSnapshots(): Promise<void> {
+  private async recoverStagingMessageSnapshots(identity?: {
+    projectId: string
+    sessionId: string
+  }): Promise<void> {
     const client = await this.options.getClient()
     const staging = await client.artifactMessageSnapshot.findMany({
-      where: { state: 'staging' }
+      where: { state: 'staging', ...identity }
     })
     for (const snapshot of staging) {
       const finalPath = resolveStorageKey(this.options.storageRoot, snapshot.storageKey)
@@ -844,10 +904,13 @@ class ProvenanceMessageSnapshotRepository {
     }
   }
 
-  private async recoverStagingReviewScopeSnapshots(): Promise<void> {
+  private async recoverStagingReviewScopeSnapshots(identity?: {
+    projectId: string
+    sessionId: string
+  }): Promise<void> {
     const client = await this.options.getClient()
     const staging = await client.reviewScopeSnapshot.findMany({
-      where: { state: 'staging' },
+      where: { state: 'staging', ...identity },
       include: { review: true }
     })
     for (const snapshot of staging) {

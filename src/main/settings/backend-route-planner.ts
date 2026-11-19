@@ -17,7 +17,7 @@ import {
   providerValidationRoute,
   shareProviderTransportFamily,
   usesAppProviderTransport
-} from '../../shared/settings'
+} from '../../shared/settings-runtime'
 import {
   REQUEST_SKILL_IMPORT_TOOL_DESCRIPTION,
   REQUEST_SKILL_IMPORT_TOOL_NAME,
@@ -287,6 +287,7 @@ class BackendRoutePlanner {
     return Object.freeze({
       frameworkId: input.frameworkId,
       providerId: input.target.providerId,
+      providerName: input.target.providerName,
       backendId: `${input.frameworkId}:${backendProviderId}`,
       route,
       model,
@@ -299,7 +300,8 @@ class BackendRoutePlanner {
               ? piSessionModel(piModelId(input.target.providerId, model))
               : model,
       sessionModelRequired:
-        input.frameworkId === 'codex' && isCodexSubscriptionProvider(input.target.provider.type),
+        route === 'codebuddy-subscription' ||
+        (input.frameworkId === 'codex' && isCodexSubscriptionProvider(input.target.provider.type)),
       supportsImageInput: input.target.provider.supportsImageInput === true,
       reasoningEffort: modelEffort(input.effortIntent, input.target),
       ...(hasClaudeTransport
@@ -397,6 +399,7 @@ class BackendRoutePlanner {
     // Devin owns its entire upstream transport; the app never routes a provider endpoint into it.
     if (frameworkId === 'devin') return Object.freeze({ kind: 'direct' })
     if (frameworkId === 'codebuddy') {
+      if (route === 'codebuddy-subscription') return Object.freeze({ kind: 'direct' })
       if (active.apiEndpoints.includes('chat-completions')) return Object.freeze({ kind: 'direct' })
       return Object.freeze({
         kind: 'codebuddy-provider-compatibility',

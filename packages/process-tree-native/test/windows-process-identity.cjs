@@ -208,37 +208,60 @@ test('does not report terminated processes whose handles are still held', window
   }
 })
 
-test(
-  'treats a process that exited with code 259 as missing while its handle is held',
-  windows,
-  async () => {
-    const root = mkdtempSync(join(tmpdir(), 'process-tree-native-exit259-'))
-    const executable = join(root, 'node.exe')
-    copyFileSync(process.execPath, executable)
-    // 259 is STILL_ACTIVE: the exit code alone cannot prove that the process is still running.
-    const jobName = `Local\\OpenScience.Delegation.${randomUUID()}`
-    const child = native.spawnWindowsOwnedProcess(
-      jobName,
-      executable,
-      ['-e', 'process.exit(259)'],
-      Object.entries(process.env).map(([key, value]) => `${key}=${value}`),
-      process.cwd(),
-      false
-    )
-    try {
-      assert.equal(await native.windowsOwnedProcessExitCodeAsync(child.handle), 259)
-      // The native external retains the process handle across every query, including async work.
-      assert.equal(native.getWindowsProcessCreationTime(child.pid), null)
-      assert.equal(native.getWindowsProcessCommandLine(child.pid), null)
-      assert.equal(native.getWindowsParentProcessId(child.pid), null)
-      assert.deepEqual(native.listWindowsInstallationOccupants([executable]), [])
-      assert.deepEqual(await native.listWindowsInstallationOccupantsAsync([executable]), [])
-      assert.equal(native.windowsOwnedProcessExitCode(child.handle), 259)
-    } finally {
-      native.reapWindowsOwnedJob(jobName)
-      for (const fd of child.fds) closeSync(fd)
-      await new Promise((resolve) => setTimeout(resolve, 200))
-      rmSync(root, { recursive: true, force: true })
+for (const namespace of ['Delegation', 'Notebook'])
+  test(
+    `treats a ${namespace} process that exited with code 259 as missing while its handle is held`,
+    windows,
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'process-tree-native-exit259-'))
+      const executable = join(root, 'node.exe')
+      copyFileSync(process.execPath, executable)
+      // 259 is STILL_ACTIVE: the exit code alone cannot prove that the process is still running.
+      const jobName = `Local\\OpenScience.${namespace}.${randomUUID()}`
+      const child = native.spawnWindowsOwnedProcess(
+        jobName,
+        executable,
+        ['-e', 'process.exit(259)'],
+        Object.entries(process.env).map(([key, value]) => `${key}=${value}`),
+        process.cwd(),
+        false
+      )
+      try {
+        assert.equal(await native.windowsOwnedProcessExitCodeAsync(child.handle), 259)
+        // The native external retains the process handle across every query, including async work.
+        assert.equal(native.getWindowsProcessCreationTime(child.pid), null)
+        assert.equal(native.getWindowsProcessCommandLine(child.pid), null)
+        assert.equal(native.getWindowsParentProcessId(child.pid), null)
+        assert.deepEqual(native.listWindowsInstallationOccupants([executable]), [])
+        assert.deepEqual(await native.listWindowsInstallationOccupantsAsync([executable]), [])
+        assert.equal(native.windowsOwnedProcessExitCode(child.handle), 259)
+      } finally {
+        native.reapWindowsOwnedJob(jobName)
+        for (const fd of child.fds) closeSync(fd)
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        rmSync(root, { recursive: true, force: true })
+      }
     }
+  )
+
+test('terminates a process only when its recorded birth still matches', windows, async () => {
+  const child = spawn(
+    process.execPath,
+    ['-e', 'process.stdout.write("ready");setInterval(()=>{},1000)'],
+    { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }
+  )
+  const exited = once(child, 'exit')
+  try {
+    await once(child.stdout, 'data')
+    const birth = native.getWindowsProcessCreationTime(child.pid)
+    assert.equal(native.windowsTerminateProcessByBirth(child.pid, '1'), false)
+    assert.equal(child.exitCode, null)
+    assert.equal(native.windowsTerminateProcessByBirth(child.pid, birth), true)
+    const [code] = await exited
+    assert.equal(code, 1)
+    assert.equal(native.windowsTerminateProcessByBirth(child.pid, birth), false)
+    assert.equal(native.windowsTerminateProcessByBirth(4294967295, birth), false)
+  } finally {
+    child.kill()
   }
-)
+})

@@ -1,3 +1,4 @@
+import { WorkspaceImageToolCard, WorkspaceImageToolOutput } from './WorkspaceImageToolCard'
 import type { ToolActivity } from '@/stores/session-store-contract'
 import { TriangleAlert } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -183,6 +184,9 @@ const WorkspaceToolDetailsRow = ({
   const { t } = useTranslation()
   const [setRowElement, isNearViewport] = useNearViewport<HTMLButtonElement>()
   const notebookRunId = details.notebookRunId
+  const isSchedule = details.sections.some(
+    (section) => section.kind === 'summary' && section.schedule
+  )
   const notebookFigureMeta = notebookRun ? formatNotebookRunFigureMeta(notebookRun, t) : undefined
   const notebookOutputLineMeta = notebookRun
     ? formatNotebookRunOutputLineMeta(notebookRun, t)
@@ -247,7 +251,15 @@ const WorkspaceToolDetailsRow = ({
         />
       )
     if (section.kind === 'summary')
-      return <WorkspaceToolSummaryCard key={index} summary={section.summary} file={section.file} />
+      return (
+        <WorkspaceToolSummaryCard
+          key={index}
+          summary={section.summary}
+          file={section.file}
+          schedule={section.schedule}
+          hideHeader={section.schedule}
+        />
+      )
     if (section.kind === 'literature') {
       return (
         <WorkspaceLiteratureToolCard
@@ -322,6 +334,7 @@ const WorkspaceToolDetailsRow = ({
         activity={activity}
         phase={phase}
         label={translateKnownCopy(details.displayName)}
+        subtitleSeparator={isSchedule ? '' : undefined}
         subtitle={
           details.displayName === 'Write file' && details.subtitle ? (
             <ExtensionPreservingFileName name={details.subtitle} />
@@ -347,6 +360,15 @@ const WorkspaceToolDetailsRow = ({
         buttonRef={setRowElement}
         onToggle={onToggle}
       >
+        {details.image ? (
+          <WorkspaceImageToolCard
+            operation={details.image.operation}
+            input={activity.rawInput}
+            result={details.image.result}
+            error={details.image.error}
+            pending={activity.status === 'in_progress'}
+          />
+        ) : null}
         {details.codeReview ? (
           <NotebookCodeReviewReceipt key={activity.id} review={details.codeReview} />
         ) : (
@@ -354,6 +376,7 @@ const WorkspaceToolDetailsRow = ({
         )}
       </WorkspaceToolActivityRowButton>
       {allowFolderAccess && notebookRun ? <NotebookFolderAccessNotice run={notebookRun} /> : null}
+      {details.image?.result ? <WorkspaceImageToolOutput result={details.image.result} /> : null}
       {notebookRun ? <NotebookToolFigureOutputs run={notebookRun} /> : null}
     </>
   )

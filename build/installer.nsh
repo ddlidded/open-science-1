@@ -8,29 +8,55 @@
   StrCpy $isForceCurrentInstall "1"
 !macroend
 
+!macro checkManualUninstallCoordination
+  # Hold the installer's existing named object before closing processes or removing any files.
+  # An update's nested uninstaller runs under the parent installer's lock and must not reacquire it.
+  ${ifNot} ${isUpdated}
+    System::Call 'kernel32::CreateMutexW(p 0, i 0, w "${APP_GUID}") p.r0 ?e'
+    Pop $1
+    ${if} $0 == 0
+      DetailPrint `Open-Science uninstall coordination failed win32=$1`
+      MessageBox MB_OK|MB_ICONSTOP "Open-Science could not check whether an installation is running. Retry uninstall after closing its installer." /SD IDOK
+      SetErrorLevel 1
+      Abort
+    ${elseif} $1 == 183
+      System::Call 'kernel32::CloseHandle(p r0)'
+      MessageBox MB_OK|MB_ICONSTOP "An Open-Science installation or uninstall is still open. Close it, then retry uninstall." /SD IDOK
+      SetErrorLevel 2
+      Abort
+    ${endif}
+    # Intentionally retain the handle: Windows closes it when this uninstaller exits.
+  ${endif}
+!macroend
+
+!include "${BUILD_RESOURCES_DIR}\windows-app-running.nsh"
+
 !macro customUnInstall
-  # Cleanup can fail after removing some program files. Keep retry's lifecycle scripts in the
-  # uninstaller itself, so their availability never depends on a partly removed installation.
+  # Cleanup can fail after removing some program files. Keep retry's lifecycle helper in the
+  # uninstaller itself, so its availability never depends on a partly removed installation.
+  # The native helper replaces one powershell.exe launch (0.6-1.2 s each) per cleanup step.
   InitPluginsDir
   SetOutPath $PLUGINSDIR
-  File "${BUILD_RESOURCES_DIR}\windows-update-handoff-uninstall.ps1"
-  File "${BUILD_RESOURCES_DIR}\windows-notebook-sandbox-uninstall.ps1"
-  File "${BUILD_RESOURCES_DIR}\windows-runtime-cache-uninstall.ps1"
+  !insertmacro extractUninstallHelper
   # Updates run the old uninstaller with isUpdated set and must retain the durable profile. Only a
   # real product uninstall removes the AppContainer resources.
   ${ifNot} ${isUpdated}
-    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-update-handoff-uninstall.ps1" -InstallPath "$INSTDIR"'
+    nsExec::ExecToLog '"$PLUGINSDIR\windows-uninstall-helper.exe" update-handoff --install-path "$INSTDIR"'
     Pop $0
     StrCmp $0 "0" updatePresentationCleanupComplete
     DetailPrint `Open-Science update presentation cleanup failure code=$0`
-    MessageBox MB_OK|MB_ICONSTOP "An Open-Science update may still be active. Finish the update and close its update window, then retry uninstall."
+    ${if} $0 == 2
+      MessageBox MB_OK|MB_ICONSTOP "An Open-Science update is still active. Finish the update and close its update window, then retry uninstall." /SD IDOK
+    ${else}
+      MessageBox MB_OK|MB_ICONSTOP "Open-Science could not check its update processes. See the uninstall details, then retry." /SD IDOK
+    ${endif}
     Abort
     updatePresentationCleanupComplete:
-    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-notebook-sandbox-uninstall.ps1" -SandboxRoot "$INSTDIR\resources\notebook-network-sandbox\windows"'
+    nsExec::ExecToLog '"$PLUGINSDIR\windows-uninstall-helper.exe" notebook-sandbox --sandbox-root "$INSTDIR\resources\notebook-network-sandbox\windows"'
     Pop $0
     StrCmp $0 "0" notebookSandboxCleanupComplete
     DetailPrint `Open-Science Notebook cleanup failure code=$0 sandboxRoot="$INSTDIR\resources\notebook-network-sandbox\windows"`
-    MessageBox MB_OK|MB_ICONSTOP "Open-Science could not safely remove its owned Notebook isolation resources. The uninstall was stopped so the cleanup can be retried."
+    MessageBox MB_OK|MB_ICONSTOP "Open-Science could not safely remove its owned Notebook isolation resources. The uninstall was stopped so the cleanup can be retried." /SD IDOK
     Abort
     notebookSandboxCleanupComplete:
     # A second installation may now own the scheme. Never remove its association.
@@ -39,7 +65,7 @@
       DeleteRegKey HKCU "Software\Classes\open-science"
     ${endif}
   ${endif}
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\windows-runtime-cache-uninstall.ps1"'
+  nsExec::ExecToLog '"$PLUGINSDIR\windows-uninstall-helper.exe" runtime-cache'
 !macroend
 
 !ifndef BUILD_UNINSTALLER
@@ -56,7 +82,6 @@
 !define MUI_CUSTOMFUNCTION_ABORT restorePreservedOnAbort
 !include "${BUILD_RESOURCES_DIR}\windows-update-handoff.nsh"
 !include "${BUILD_RESOURCES_DIR}\windows-install-publication.nsh"
-!include "${BUILD_RESOURCES_DIR}\windows-app-running.nsh"
 
 # Quit bypasses .onInstFailed and every other NSIS callback. Publish the existing failure
 # receipt at each explicit failure exit so the detached presentation can become dismissible.
@@ -128,7 +153,7 @@ FunctionEnd
     ${if} ${Errors}
       DetailPrint `Open-Science data protection failure code=parent-path-unresolved path="${DIR}\${FOLDER}"`
       DetailPrint `Could not safely preserve "${DIR}\${FOLDER}"; its parent path could not be resolved.`
-      MessageBox MB_OK|MB_ICONSTOP "Open-Science could not safely protect its data folder before updating.$\r$\nThe existing data was left untouched."
+      MessageBox MB_OK|MB_ICONSTOP "Open-Science could not safely protect its data folder before updating.$\r$\nThe existing data was left untouched." /SD IDOK
       StrCpy $dataProtectionFailed "1"
     ${else}
       StrCpy ${BACKUP} "$R2\.open-science-update-data-${SLOT}"
@@ -136,7 +161,7 @@ FunctionEnd
         ${if} ${FileExists} "${BACKUP}"
           DetailPrint `Open-Science data protection failure code=backup-already-exists path="${DIR}\${FOLDER}" backup="${BACKUP}"`
           DetailPrint `Could not safely preserve "${DIR}\${FOLDER}" because the backup path already exists: ${BACKUP}`
-          MessageBox MB_OK|MB_ICONSTOP "Open-Science found both the current data folder and an earlier update backup.$\r$\nNo data was changed. Please inspect:$\r$\n${BACKUP}"
+          MessageBox MB_OK|MB_ICONSTOP "Open-Science found both the current data folder and an earlier update backup.$\r$\nNo data was changed. Please inspect:$\r$\n${BACKUP}" /SD IDOK
           StrCpy ${BACKUP} ""
           StrCpy $dataProtectionFailed "1"
         ${else}
@@ -162,7 +187,7 @@ FunctionEnd
       ${if} ${FileExists} "${DIR}\${FOLDER}\*.*"
         DetailPrint `Open-Science data protection failure code=restore-destination-exists path="${DIR}\${FOLDER}" backup="${BACKUP}"`
         DetailPrint `The preserved data remains at: ${BACKUP}`
-        MessageBox MB_OK|MB_ICONSTOP "Open-Science could not restore its data folder because the destination already exists.$\r$\nThe preserved data remains at:$\r$\n${BACKUP}"
+        MessageBox MB_OK|MB_ICONSTOP "Open-Science could not restore its data folder because the destination already exists.$\r$\nThe preserved data remains at:$\r$\n${BACKUP}" /SD IDOK
         StrCpy $dataRestoreFailed "1"
       ${else}
         CreateDirectory "${DIR}"
@@ -171,7 +196,7 @@ FunctionEnd
         ${if} ${Errors}
           DetailPrint `Open-Science data protection failure code=restore-rename-failed path="${DIR}\${FOLDER}" backup="${BACKUP}"`
           DetailPrint `The preserved data remains at: ${BACKUP}`
-          MessageBox MB_OK|MB_ICONSTOP "Open-Science could not restore its data folder after updating.$\r$\nThe preserved data remains at:$\r$\n${BACKUP}"
+          MessageBox MB_OK|MB_ICONSTOP "Open-Science could not restore its data folder after updating.$\r$\nThe preserved data remains at:$\r$\n${BACKUP}" /SD IDOK
           StrCpy $dataRestoreFailed "1"
         ${else}
           DetailPrint `Restored the data folder to: ${DIR}\${FOLDER}`
@@ -278,7 +303,7 @@ FunctionEnd
 
 !macro customInit
   Call initializeUpdateReceipts
-  # Keep the explicit override empty so diagnostics.ps1 uses its ordinary-user LocalAppData fallback.
+  # Keep the explicit override empty so the native diagnostics helper uses its ordinary-user LocalAppData fallback.
   # Initializing the NSIS variable also keeps makensis warning-as-error builds clean.
   StrCpy $installDiagnosticDirectory ""
   # Cache both registered locations before either uninstall pass deletes their registry data.
@@ -464,18 +489,15 @@ FunctionEnd
 # constants, and the literal temp-uninstaller path uninstallOldVersion uses.
 !macro uninstallFailureRecoveryAt DIR
   DetailPrint `Old uninstaller exited with $R0; closing leftover app processes and retrying once.`
-  # Force-kill anything still running from the install dir, then retry. The PowerShell sweep
-  # matches on ExecutablePath (Win32_Process has no Path property) with a trailing-backslash
-  # boundary so a sibling directory can never match, and receives the directory as an ARGUMENT —
-  # never interpolated into the script source — so a custom install dir containing an apostrophe
-  # breaks nothing and injects nothing. If inspection is unavailable, never widen the target
-  # to executable names: another installation or an unrelated tool may use the same name.
-  # $0 keeps the uninstaller arguments (/currentuser etc.) — nsExec does not touch it.
-  nsExec::Exec `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -C "$$root = $$args[0].TrimEnd('\') + '\'; Get-CimInstance -ClassName Win32_Process | ? { $$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$root, 'CurrentCultureIgnoreCase') } | % { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }" "${DIR}"`
-  Pop $R1
+  # Terminate anything still running from the install dir, then retry. The native sweep matches
+  # full image paths with a trailing-backslash boundary so a sibling directory can never match.
+  # If inspection is unavailable, never widen the target to executable names: another
+  # installation or an unrelated tool may use the same name. $0 keeps the uninstaller arguments
+  # (/currentuser etc.); the sweep overwrites only $R0 (already reported above) and $R1.
+  !insertmacro openScienceInstallProcesses "${DIR}" stop $R1
   # The existing uninstall retry remains the verdict even when process inspection fails.
-  ${if} $R1 != 0
-    DetailPrint `Could not inspect installation processes: $R1; retrying without terminating unverified processes.`
+  ${if} $R1 == "error"
+    DetailPrint `Could not inspect installation processes; retrying without terminating unverified processes.`
   ${endif}
   ClearErrors
   Sleep 1000

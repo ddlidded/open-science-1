@@ -675,6 +675,191 @@ describe('artifact provenance repository', () => {
     await expect(stat(stagingDirectory)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it('plans old rowless staging without deleting it before guarded application', async () => {
+    storageRoot = await mkdtemp(join(tmpdir(), 'artifact-staging-cleanup-plan-'))
+    const client = createProjectDbClient(storageRoot)
+    disconnect = () => client.$disconnect()
+    await migrateApplicationDatabase(client)
+    const directory = join(
+      storageRoot,
+      'artifacts/project-1/session-1/.provenance/.staging/versions/orphan'
+    )
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'content'), 'orphaned bytes')
+    const oldTime = new Date(Date.now() - 2 * 60 * 60 * 1_000)
+    await utimes(directory, oldTime, oldTime)
+    const startupCutoff = (await stat(directory)).ctimeMs + 1
+    const repository = new ArtifactProvenanceRepository({
+      storageRoot,
+      getClient: async () => client,
+      now: () => new Date(startupCutoff + 2 * 60 * 60 * 1_000)
+    })
+
+    const actions = await repository.planOrphanStagingCleanup(
+      'project-1',
+      'session-1',
+      startupCutoff
+    )
+    expect(actions).toHaveLength(1)
+    await expect(readFile(join(directory, 'content'), 'utf8')).resolves.toBe('orphaned bytes')
+    await expect(actions[0](async () => false)).resolves.toBe('stale')
+    await expect(readFile(join(directory, 'content'), 'utf8')).resolves.toBe('orphaned bytes')
+    let writerEntered = false
+    let writing: Promise<void> | undefined
+    try {
+      await expect(
+        actions[0](async (apply) => {
+          writing = repository.withSessionMutation(
+            { projectId: 'project-1', appSessionId: 'session-1' },
+            async () => {
+              writerEntered = true
+            }
+          )
+          await new Promise<void>((resolve) => setImmediate(resolve))
+          expect(writerEntered).toBe(false)
+          await apply()
+          return true
+        })
+      ).resolves.toBe('complete')
+    } finally {
+      await writing
+    }
+    expect(writerEntered).toBe(true)
+    await expect(stat(directory)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('preserves staging first observed after startup even after the age grace expires', async () => {
+    storageRoot = await mkdtemp(join(tmpdir(), 'artifact-staging-startup-cutoff-'))
+    const client = createProjectDbClient(storageRoot)
+    disconnect = () => client.$disconnect()
+    await migrateApplicationDatabase(client)
+    const directory = join(
+      storageRoot,
+      'artifacts/project-1/session-1/.provenance/.staging/versions/new-copy'
+    )
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'content'), 'new in-process bytes')
+    const oldTime = new Date(Date.now() - 2 * 60 * 60 * 1_000)
+    await utimes(directory, oldTime, oldTime)
+    // Even backdated directory mtime cannot make a post-startup directory eligible.
+    const startupCutoff = (await stat(directory)).ctimeMs - 1
+    const repository = new ArtifactProvenanceRepository({
+      storageRoot,
+      getClient: async () => client,
+      now: () => new Date(startupCutoff + 3 * 60 * 60 * 1_000)
+    })
+
+    expect(
+      await repository.planOrphanStagingCleanup('project-1', 'session-1', startupCutoff)
+    ).toEqual([])
+    await expect(readFile(join(directory, 'content'), 'utf8')).resolves.toBe('new in-process bytes')
+  })
+
+  it.each(['touched', 'replaced'] as const)(
+    'yields busy artifact ownership without entering cleanup guard and preserves staging %s',
+    async (change) => {
+      storageRoot = await mkdtemp(join(tmpdir(), 'artifact-staging-cleanup-ownership-'))
+      const client = createProjectDbClient(storageRoot)
+      disconnect = () => client.$disconnect()
+      await migrateApplicationDatabase(client)
+      const directory = join(
+        storageRoot,
+        'artifacts/project-1/session-1/.provenance/.staging/versions/orphan'
+      )
+      await mkdir(directory, { recursive: true })
+      const oldTime = new Date(Date.now() - 2 * 60 * 60 * 1_000)
+      await utimes(directory, oldTime, oldTime)
+      const startupCutoff = (await stat(directory)).ctimeMs + 1
+      const repository = new ArtifactProvenanceRepository({
+        storageRoot,
+        getClient: async () => client,
+        now: () => new Date(startupCutoff + 2 * 60 * 60 * 1_000)
+      })
+      const actions = await repository.planOrphanStagingCleanup(
+        'project-1',
+        'session-1',
+        startupCutoff
+      )
+      expect(actions).toHaveLength(1)
+      const entered = createDeferred()
+      const release = createDeferred()
+      const writing = repository.withSessionMutation(
+        { projectId: 'project-1', appSessionId: 'session-1' },
+        async () => {
+          entered.resolve()
+          await release.promise
+          if (change === 'replaced') {
+            await rm(directory, { recursive: true })
+            await mkdir(directory)
+          }
+          await writeFile(join(directory, 'new-copy'), 'active writer bytes')
+          await utimes(directory, new Date(startupCutoff + 10), new Date(startupCutoff + 10))
+        }
+      )
+      await entered.promise
+      let guardEntered = false
+      const commit = async (apply: () => Promise<void>): Promise<boolean> => {
+        guardEntered = true
+        await apply()
+        return true
+      }
+      const applying = actions[0](commit)
+      try {
+        const result = await Promise.race([
+          applying,
+          new Promise<'still waiting'>((resolve) => setImmediate(() => resolve('still waiting')))
+        ])
+        expect(result).toBe('busy')
+        expect(guardEntered).toBe(false)
+        await expect(stat(directory)).resolves.toBeDefined()
+      } finally {
+        release.resolve()
+        await Promise.all([writing, applying])
+      }
+      await expect(actions[0](commit)).resolves.toBe('complete')
+      expect(guardEntered).toBe(true)
+      await expect(readFile(join(directory, 'new-copy'), 'utf8')).resolves.toBe(
+        'active writer bytes'
+      )
+    }
+  )
+
+  it('preserves a directory that gains Version authority after cleanup planning', async () => {
+    const fixture = await createPdfTransactionFixture()
+    const version = await fixture.repository.createVersion(fixture.request)
+    const row = await fixture.client.artifactVersion.findUniqueOrThrow({
+      where: { id: version.versionId }
+    })
+    await fixture.client.artifactVersion.delete({ where: { id: version.versionId } })
+    const directory = join(
+      storageRoot!,
+      'artifacts/project-1/session-1/.provenance/.staging/versions',
+      version.versionId
+    )
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'content'), 'owned bytes')
+    const oldTime = new Date(Date.now() - 2 * 60 * 60 * 1_000)
+    await utimes(directory, oldTime, oldTime)
+    const startupCutoff = (await stat(directory)).ctimeMs + 1
+    const repository = new ArtifactProvenanceRepository({
+      storageRoot: storageRoot!,
+      getClient: async () => fixture.client,
+      now: () => new Date(startupCutoff + 2 * 60 * 60 * 1_000)
+    })
+    const actions = await repository.planOrphanStagingCleanup(
+      'project-1',
+      'session-1',
+      startupCutoff
+    )
+    expect(actions).toHaveLength(1)
+    await fixture.client.artifactVersion.create({ data: row })
+    await actions[0](async (apply) => {
+      await apply()
+      return true
+    })
+    await expect(readFile(join(directory, 'content'), 'utf8')).resolves.toBe('owned bytes')
+  })
+
   it('leaves a fresh rowless staging directory for an in-flight writer', async () => {
     storageRoot = await mkdtemp(join(tmpdir(), 'open-science-artifact-live-staging-'))
     const client = createProjectDbClient(storageRoot)
@@ -1022,6 +1207,51 @@ describe('artifact provenance repository', () => {
     ])
   })
 
+  it('retains exact pending ownership when a long filename is published through a case alias', async () => {
+    storageRoot = await mkdtemp(join(tmpdir(), 'open-science-long-alias-'))
+    const client = createProjectDbClient(storageRoot)
+    disconnect = () => client.$disconnect()
+    await migrateApplicationDatabase(client)
+    const compatibilityRepository = new ArtifactRepository(storageRoot)
+    const repository = new ArtifactProvenanceRepository({
+      storageRoot,
+      getClient: async () => client,
+      compatibilityRepository
+    })
+    const filename = '研'.repeat(30) + '.MD'
+    await compatibilityRepository.writePendingFile({
+      projectId: 'p',
+      sessionId: 'artifact-s',
+      runId: 'r',
+      filename,
+      mimeType: 'text/markdown',
+      source: { kind: 'inline', content: 'body', encoding: 'utf8' }
+    })
+    const version = await repository.createVersion({
+      projectId: 'p',
+      appSessionId: 's',
+      artifactStorageSessionId: 'artifact-s',
+      artifactRunId: 'r',
+      rootFrameId: 'root',
+      agentFrameId: 'agent',
+      messageBranchId: 'branch',
+      runtimeSegmentId: 'segment',
+      promptMessageId: 'prompt',
+      filename: filename.toLowerCase(),
+      contentType: 'text/markdown',
+      writeOperationId: 'write-1',
+      writeRequestChecksum: 'a'.repeat(64)
+    })
+    expect(await readFile(version.path, 'utf8')).toBe('body')
+    expect(
+      await compatibilityRepository.findPendingVersionRouting({
+        projectId: 'p',
+        artifactId: version.artifactId,
+        versionId: version.versionId
+      })
+    ).toMatchObject({ versionId: version.versionId, checksum: version.checksum })
+  })
+
   it('selects the exact pending filename when multiple files share one normalized name', async () => {
     storageRoot = await mkdtemp(join(tmpdir(), 'open-science-artifact-exact-filename-'))
     const client = createProjectDbClient(storageRoot)
@@ -1145,7 +1375,8 @@ describe('artifact provenance repository', () => {
     })
 
     const content = Buffer.from([0, 255, 1, 254, 2, 253])
-    const version = await repository.writeAppGeneratedVersion({
+    const input = {
+      writeOperationId: 'image-operation',
       projectId: 'project-1',
       appSessionId: 'session-1',
       artifactStorageSessionId: 'artifact-session-1',
@@ -1158,9 +1389,18 @@ describe('artifact provenance repository', () => {
       agentName: 'OpenCode',
       filename: 'generated.bin',
       content: content.toString('base64'),
-      encoding: 'base64',
+      encoding: 'base64' as const,
       contentType: 'application/octet-stream'
-    })
+    }
+    const version = await repository.writeAppGeneratedVersion(input)
+    const replay = await repository.writeAppGeneratedVersion(input)
+    expect(replay.versionId).toBe(version.versionId)
+    await expect(
+      repository.writeAppGeneratedVersion({
+        ...input,
+        content: Buffer.from('changed').toString('base64')
+      })
+    ).rejects.toThrow()
 
     await expect(readFile(version.path)).resolves.toEqual(content)
     await expect(
@@ -1263,78 +1503,83 @@ describe('artifact provenance repository', () => {
     expect(result).toBe('settled')
   })
 
-  it('persists a trusted app-owned Connector execution receipt with its generated Version', async () => {
-    storageRoot = await mkdtemp(join(tmpdir(), 'open-science-connector-provenance-'))
-    const client = createProjectDbClient(storageRoot)
-    disconnect = () => client.$disconnect()
-    await migrateApplicationDatabase(client)
-    const repository = new ArtifactProvenanceRepository({
-      storageRoot,
-      getClient: () => Promise.resolve(client),
-      compatibilityRepository: new ArtifactRepository(storageRoot)
-    })
-    const normalizedArguments = {
-      filename: 'caffeine',
-      smiles: 'CN1C=NC2=C1C(=O)N(C(=O)N2C)C'
-    }
-    const argumentsChecksum = createHash('sha256')
-      .update(JSON.stringify(normalizedArguments))
-      .digest('hex')
-
-    const version = await repository.writeAppGeneratedVersion({
-      projectId: 'project-1',
-      appSessionId: 'session-1',
-      artifactStorageSessionId: 'artifact-session-1',
-      artifactRunId: 'artifact-run-1',
-      rootFrameId: 'root-frame-1',
-      agentFrameId: 'agent-frame-1',
-      messageBranchId: 'branch-1',
-      runtimeSegmentId: 'runtime-segment-1',
-      promptMessageId: 'prompt-1',
-      agentName: 'OpenCode',
-      filename: 'caffeine.mol',
-      content: 'generated molecule bytes',
-      contentType: 'chemical/x-mdl-molfile',
-      producer: {
-        kind: 'connector',
-        connectorId: 'molecule',
-        toolId: 'preview_molecule',
-        invocationId: 'connector-call-1',
-        implementationVersion: '1',
-        normalizedArguments
+  it.each(['molecule', 'image-model'])(
+    'persists a trusted %s receipt including a full multilingual image prompt',
+    async (connectorId) => {
+      storageRoot = await mkdtemp(join(tmpdir(), 'open-science-connector-provenance-'))
+      const client = createProjectDbClient(storageRoot)
+      disconnect = () => client.$disconnect()
+      await migrateApplicationDatabase(client)
+      const repository = new ArtifactProvenanceRepository({
+        storageRoot,
+        getClient: () => Promise.resolve(client),
+        compatibilityRepository: new ArtifactRepository(storageRoot)
+      })
+      const normalizedArguments = {
+        filename: 'caffeine',
+        ...(connectorId === 'image-model'
+          ? { prompt: '科研😀'.repeat(8000) }
+          : { smiles: 'CN1C=NC2=C1C(=O)N(C(=O)N2C)C' })
       }
-    })
+      const argumentsChecksum = createHash('sha256')
+        .update(JSON.stringify(normalizedArguments))
+        .digest('hex')
 
-    await expect(
-      repository.getVersionProvenance({
+      const version = await repository.writeAppGeneratedVersion({
         projectId: 'project-1',
         appSessionId: 'session-1',
-        artifactId: version.artifactId,
-        versionId: version.versionId
-      })
-    ).resolves.toMatchObject({
-      evidence: {
+        artifactStorageSessionId: 'artifact-session-1',
+        artifactRunId: 'artifact-run-1',
+        rootFrameId: 'root-frame-1',
+        agentFrameId: 'agent-frame-1',
+        messageBranchId: 'branch-1',
+        runtimeSegmentId: 'runtime-segment-1',
+        promptMessageId: 'prompt-1',
+        agentName: 'OpenCode',
+        filename: 'caffeine.mol',
+        content: 'generated molecule bytes',
+        contentType: 'chemical/x-mdl-molfile',
         producer: {
-          state: 'available',
           kind: 'connector',
-          connector_id: 'molecule',
-          tool_id: 'preview_molecule',
-          invocation_id: 'connector-call-1',
-          implementation_version: '1',
-          arguments_checksum: argumentsChecksum,
-          association_method: 'app-owned-handler'
-        },
-        connector_execution: {
-          schema_version: 1,
-          normalized_arguments: normalizedArguments,
-          arguments_checksum: argumentsChecksum
-        },
-        execution_status: { state: 'partial' },
-        environment_status: { state: 'unavailable', reason: 'environment-not-supported' },
-        inputs: []
-      }
-    })
-  })
+          connectorId,
+          toolId: 'preview_molecule',
+          invocationId: 'connector-call-1',
+          implementationVersion: '1',
+          normalizedArguments
+        }
+      })
+
+      await expect(
+        repository.getVersionProvenance({
+          projectId: 'project-1',
+          appSessionId: 'session-1',
+          artifactId: version.artifactId,
+          versionId: version.versionId
+        })
+      ).resolves.toMatchObject({
+        evidence: {
+          producer: {
+            state: 'available',
+            kind: 'connector',
+            connector_id: connectorId,
+            tool_id: 'preview_molecule',
+            invocation_id: 'connector-call-1',
+            implementation_version: '1',
+            arguments_checksum: argumentsChecksum,
+            association_method: 'app-owned-handler'
+          },
+          connector_execution: {
+            schema_version: 1,
+            normalized_arguments: normalizedArguments,
+            arguments_checksum: argumentsChecksum
+          },
+          execution_status: { state: 'partial' },
+          environment_status: { state: 'unavailable', reason: 'environment-not-supported' },
+          inputs: []
+        }
+      })
+    }
+  )
 
   it('ignores Connector producer claims attached to the ordinary Artifact create request', async () => {
     storageRoot = await mkdtemp(join(tmpdir(), 'open-science-untrusted-connector-provenance-'))

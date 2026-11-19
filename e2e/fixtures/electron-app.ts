@@ -1,3 +1,4 @@
+import { CODEBUDDY_VERSION } from '../../src/main/settings/codebuddy-install'
 import {
   observeFixtureService,
   cleanupObservedFixtureService,
@@ -14,6 +15,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rm,
   writeFile
 } from 'node:fs/promises'
@@ -55,6 +57,7 @@ import type { UpdateStatus } from '../../src/shared/update'
 import { prepareBrandStorageFixture } from './brand-storage-data'
 import { captureNativeQuitDialog } from './native-quit-dialog'
 import type { PackageOperationSnapshot } from '../../src/shared/session-package'
+import { sessionJournalPath } from '../../src/main/session-persistence/journal'
 import { createSessionFile, type PersistedChatSession } from '../../src/shared/session-persistence'
 
 const APP_ROOT = resolve(process.cwd())
@@ -302,7 +305,7 @@ const settlesWithin = async (promise: Promise<void>, timeoutMs: number): Promise
 
 // Allow platform-specific shutdown latency while keeping each cleanup phase bounded.
 const CLEANUP_GRACEFUL_TIMEOUT_MS =
-  process.platform === 'win32' ? 30_000 : process.platform === 'darwin' ? 20_000 : 10_000
+  process.platform === 'win32' ? 30_000 : process.platform === 'darwin' ? 30_000 : 10_000
 const CLEANUP_FORCED_TIMEOUT_MS =
   process.platform === 'win32' ? 30_000 : process.platform === 'darwin' ? 20_000 : 10_000
 
@@ -349,6 +352,7 @@ type NativeMenuProbe = {
 }
 type ElectronApp = {
   addCleanupAudit: (audit: () => Promise<void>) => void
+  isolatedDataRoot: () => Promise<string>
   captureBrandState: () => Promise<BrandState>
   restartWithBrandFixture: (
     mode: 'legacy' | 'legacy-config' | 'custom' | 'onboarding'
@@ -415,6 +419,11 @@ type ElectronApp = {
   }) => Promise<Page>
   restartAfterCrash: (options?: { force?: boolean }) => Promise<Page>
   restartWithCorruptHistoricalSessionFile: (projectId: string) => Promise<Page>
+  restartWithRawSessionFileFixture: (fixture: {
+    projectId: string
+    sessionId: string
+    contents: string
+  }) => Promise<Page>
   restartWithSessionFixture: (
     session: PersistedChatSession,
     notebookRuns?: NotebookRunRecord[],
@@ -425,6 +434,7 @@ type ElectronApp = {
   captureResourceTimings: (prefix?: string) => Promise<void>
   sampleResourceProfileNow: () => Promise<void>
   setMainWindowSize: (width: number, height: number) => Promise<void>
+  setMainWindowSizeAndViewport: (width: number, height: number) => Promise<void>
   auditSourceAttachments: () => Promise<JSHandle<boolean[]>>
   pressSourcePreviewShortcut: (
     url: string,
@@ -460,6 +470,7 @@ const launchEnvironment = (
       'comspec',
       'temp',
       'tmp',
+      'tmpdir',
       'number_of_processors',
       'processor_architecture',
       'systemdrive',
@@ -484,6 +495,8 @@ const launchEnvironment = (
         !key.startsWith('OPEN_SCIENCE_E2E_') &&
         key !== 'OPEN_SCIENCE_WINDOWS_APPCONTAINER_CERT' &&
         key !== 'OPEN_SCIENCE_BROWSER_IMPORT_DISCOVERY_PORT' &&
+        key !== 'OPEN_SCIENCE_ALLOW_MULTI_INSTANCE' &&
+        key !== 'OPEN_SCIENCE_WEB_PORT' &&
         key !== 'OPEN_SCIENCE_MICROMAMBA_BIN'
       )
         delete environment[key]
@@ -703,6 +716,15 @@ const launchOpenScience = async (
     ...electronLaunchTarget(userDataRoot),
     args: [...electronLaunchTarget(userDataRoot).args, ...(packagePath ? [packagePath] : [])],
     cwd: fakeRemoteItEnabled ? fakeRemoteItRoot : APP_ROOT,
+    // Opt-in recordings stay outside disposable fixture profiles for before/after evidence.
+    ...(process.env.OPEN_SCIENCE_E2E_VIDEO_DIR
+      ? {
+          recordVideo: {
+            dir: process.env.OPEN_SCIENCE_E2E_VIDEO_DIR,
+            size: { width: 1280, height: 900 }
+          }
+        }
+      : {}),
     env: {
       ...environment,
       ...(process.platform === 'darwin' && !process.env.OPEN_SCIENCE_E2E_EXECUTABLE
@@ -946,14 +968,15 @@ class ElectronAppHarness implements ElectronApp {
           : 'open-science-electron-e2e-'
       )
     )
+    const canonicalRoot = await realpath(testRoot)
     const harness = new ElectronAppHarness(
       testRoot,
       {
         fakeAgentBinRoot: join(testRoot, 'fake-agent-bin'),
         fakeRemoteItRoot: join(testRoot, 'fake-remoteit'),
         fakeRemoteItState: join(testRoot, 'fake-remoteit-state.json'),
-        storageRoot: join(testRoot, 'storage'),
-        userDataRoot: join(testRoot, 'electron-profile')
+        storageRoot: join(canonicalRoot, 'storage'),
+        userDataRoot: join(canonicalRoot, 'electron-profile')
       },
       windowMode
     )
@@ -1357,13 +1380,13 @@ class ElectronAppHarness implements ElectronApp {
       await writeFile(
         codebuddyPath,
         process.platform === 'win32'
-          ? `@echo off\r\nif "%~1"=="--version" (echo 2.138.0 & exit /b 0)\r\n"${process.execPath}" "${FAKE_AGENT_PATH}" %*\r\n`
-          : `#!/bin/sh\nif [ "$1" = "--version" ]; then echo 2.138.0; exit 0; fi\nexec ${shellQuote(process.execPath)} ${shellQuote(FAKE_AGENT_PATH)} "$@"\n`,
+          ? `@echo off\r\nif "%~1"=="--version" (echo ${CODEBUDDY_VERSION} & exit /b 0)\r\n"${process.execPath}" "${FAKE_AGENT_PATH}" %*\r\n`
+          : `#!/bin/sh\nif [ "$1" = "--version" ]; then echo ${CODEBUDDY_VERSION}; exit 0; fi\nexec ${shellQuote(process.execPath)} ${shellQuote(FAKE_AGENT_PATH)} "$@"\n`,
         'utf8'
       )
       if (process.platform !== 'win32') await chmod(codebuddyPath, 0o755)
       settings.codebuddyPath = codebuddyPath
-      settings.codebuddyVersion = '2.138.0'
+      settings.codebuddyVersion = CODEBUDDY_VERSION
     }
     if (
       process.env.OPEN_SCIENCE_E2E_MICROMAMBA_EVENTS ||
@@ -1636,6 +1659,22 @@ class ElectronAppHarness implements ElectronApp {
     )
   }
 
+  async setMainWindowSizeAndViewport(width: number, height: number): Promise<void> {
+    await this.page.setViewportSize({ width, height })
+    await this.setMainWindowSize(width, height)
+    await expect
+      .poll(() =>
+        this.runningApplication.evaluate(({ BrowserWindow }) => {
+          const bounds = BrowserWindow.getAllWindows()[0].getBounds()
+          return { width: bounds.width, height: bounds.height }
+        })
+      )
+      .toEqual({ width, height })
+    await expect
+      .poll(() => this.page.evaluate(() => ({ width: innerWidth, height: innerHeight })))
+      .toEqual({ width, height })
+  }
+
   async pressSourcePreviewShortcut(
     url: string,
     key: string,
@@ -1813,6 +1852,16 @@ class ElectronAppHarness implements ElectronApp {
     this.sabotagedDelegatedHandoffs.delete(childName)
   }
 
+  async isolatedDataRoot(): Promise<string> {
+    const dataRoot = await realpath(
+      await this.page.evaluate(async () => (await window.api.storage.getInfo()).dataRoot)
+    )
+    const offset = relative(await realpath(this.testRoot), dataRoot)
+    if (!offset || offset === '..' || offset.startsWith('..' + sep) || isAbsolute(offset))
+      throw new Error('Data root is outside the Electron fixture: ' + dataRoot)
+    return dataRoot
+  }
+
   async captureBrandState(): Promise<BrandState> {
     return this.runningApplication.evaluate(({ app, BrowserWindow, Menu }) => ({
       name: app.getName(),
@@ -1911,8 +1960,12 @@ class ElectronAppHarness implements ElectronApp {
       const directory = join(this.roots.storageRoot, 'sessions', fixture.projectId)
       await mkdir(directory, { recursive: true })
       await writeFile(
-        join(directory, `${fixture.id}.json`),
-        JSON.stringify(createSessionFile(fixture))
+        join(directory, `${fixture.id}.jsonl`),
+        JSON.stringify({
+          type: 'session_snapshot',
+          journalVersion: 1,
+          document: createSessionFile(fixture)
+        }) + '\n'
       )
     }
     if (dataRoot && notebookRuns.length) {
@@ -1938,6 +1991,33 @@ class ElectronAppHarness implements ElectronApp {
         })
     }
     // Rebuild the catalog from the fixture file, just as the historical-session fixture does.
+    const client = createProjectDbClient(this.roots.storageRoot)
+    try {
+      await client.sessionProjectionState.deleteMany()
+    } finally {
+      await client.$disconnect()
+    }
+    await this.launch()
+    return this.page
+  }
+
+  async restartWithRawSessionFileFixture(fixture: {
+    projectId: string
+    sessionId: string
+    contents: string
+  }): Promise<Page> {
+    if (![fixture.projectId, fixture.sessionId].every((id) => /^[a-zA-Z0-9_-]+$/.test(id))) {
+      throw new Error('Invalid E2E Session fixture identity.')
+    }
+    await this.close()
+    const directory = join(this.roots.storageRoot, 'sessions', fixture.projectId)
+    await mkdir(directory, { recursive: true })
+    // Preserve the released fixture byte-for-byte instead of re-encoding it through the current
+    // createSessionFile projection.
+    const path = join(directory, `${fixture.sessionId}.json`)
+    await writeFile(path, fixture.contents, 'utf8')
+    // A current journal takes precedence over the explicitly requested legacy fixture.
+    await rm(sessionJournalPath(path), { force: true })
     const client = createProjectDbClient(this.roots.storageRoot)
     try {
       await client.sessionProjectionState.deleteMany()

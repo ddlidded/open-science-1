@@ -1,3 +1,7 @@
+import {
+  createNotebookCellPreview,
+  type NotebookCellPreview
+} from '../../shared/notebook-process-monitor'
 import { createLogger } from '@aipoch/diagnostics/node'
 import type { analyzeNotebookSourceFileAccess } from '@aipoch/notebook-analysis'
 import { observeResourceProcess, recordResourceEvent } from '../resource-diagnostics/recorder'
@@ -18,6 +22,7 @@ import {
   notebookErrorRecovery
 } from '../../shared/notebook-execution-error'
 import { nodeRuntimeEnvironment } from '../node-process-host'
+import { reapWindowsOwnedJob, spawnWindowsOwnedProcess } from '../process-tree-windows'
 import { runtimeMetadataIfConfigured } from '../runtime-metadata'
 import { kernelExecutableReadRoot } from './kernel-executable-read-root'
 import { diagnoseKernelExit } from './kernel-exit-diagnostics'
@@ -50,8 +55,10 @@ import {
 import {
   assertProcessTreeSupport,
   createPosixProcessTreeOwnership,
+  registerProcessTreeOwnership,
   terminateProcessTree,
   trackOwnedPosixProcessTree,
+  capturePosixProcessTreeIdentity,
   type ProcessTreeKillResult
 } from '../process-tree'
 import {
@@ -292,6 +299,9 @@ type PendingRequest = {
 
 // One persistent loop process for a (kind, env), reused across cells until it exits or is killed.
 type ProcState = {
+  lastCell?: NotebookCellPreview
+  startedAt: number
+  cleanupPending?: boolean
   kind: KernelProcessKind
   // Resolved env name backing this proc (DEFAULT_PY_ENV / DEFAULT_R_ENV or a named env); '' for the
   // env-agnostic repl. Reported to the idle/terminated callbacks so the caller keys per-env status.
@@ -539,6 +549,34 @@ const helperInitializationError = (
 // NotebookExecutionResult (mapLoopOutputs). The python/r data loops and the repl control loop coexist
 // as independent processes; the requested kind never triggers a restart of another.
 class NotebookKernelExecutor implements NotebookExecutor {
+  monitoredProcesses(): import('./process-monitor').MonitoredKernelProcess[] {
+    const live = [...this.procs.values()]
+    const pending = [...this.pendingTeardowns.values()].map(({ owner }) => owner)
+    return [...new Set([...live, ...pending])].map((proc) => ({
+      identity: proc,
+      processKey: proc.key,
+      pid: proc.child.pid,
+      startedAt: proc.startedAt,
+      lastCell: proc.lastCell,
+      status:
+        this.procs.get(proc.key) === proc
+          ? proc.pending
+            ? 'running'
+            : 'idle'
+          : proc.cleanupPending
+            ? 'cleaning'
+            : 'cleanup-failed',
+      terminate: async () => {
+        if (this.procs.get(proc.key) === proc) {
+          await this.terminate(proc.kind, proc.env)
+        } else if (this.pendingTeardowns.get(proc.key)?.owner === proc) {
+          const result = await this.reconcilePendingTeardown(proc.key)
+          if (!result?.reaped) throw new Error('Notebook process-tree cleanup remains incomplete.')
+        } else throw new Error('Notebook process changed. Refresh the list.')
+      }
+    }))
+  }
+
   idleProcesses(): ReturnType<NonNullable<NotebookExecutor['idleProcesses']>> {
     return Array.from(this.procs.values(), (proc) => ({
       identity: proc,
@@ -967,6 +1005,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
     })
     const readline = createInterface({ input: boundedOutput })
     const proc: ProcState = {
+      startedAt: Date.now(),
       kind,
       env,
       key,
@@ -1298,6 +1337,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
         const proof = (async () => {
           // POSIX retries verify recorded birth identities. Windows taskkill only addresses a PID,
           // so never repeat it after the first attempt; only its native owner may supply late proof.
+          const windowsJobName = ownershipIntent?.record.windowsJobName
           const killOwnedChild = (): Promise<ProcessTreeKillResult> =>
             this.killChild(child).catch(() => {
               log.warn('kernel process termination attempt failed', {
@@ -1329,7 +1369,8 @@ class NotebookKernelExecutor implements NotebookExecutor {
             nativeTerminationProof &&
             sandboxed?.requestProcessTreeTermination
           ) {
-            result = { reaped: await nativeTerminationProof().catch(() => false) }
+            const nativeReaped = await nativeTerminationProof().catch(() => false)
+            if (!windowsJobName) result = { reaped: nativeReaped }
           } else if (!result.reaped && (await nativeTerminationProof?.().catch(() => false))) {
             result = { reaped: true }
           }
@@ -1346,6 +1387,11 @@ class NotebookKernelExecutor implements NotebookExecutor {
             // host exits; killing it here could interrupt ACL restoration. The caller's existing
             // shutdown budget still applies and must not turn an unfinished drain into success.
             await new Promise<void>((resolve) => child.once('exit', () => resolve()))
+          }
+          // The inner proof covers the workload only. Settle the outer host and any remaining
+          // descendants as well, without depending on a supervisor that may already have crashed.
+          if (windowsJobName) {
+            result = { reaped: await reapWindowsOwnedJob(windowsJobName).catch(() => false) }
           }
           log.info('kernel process termination proof', {
             sessionId: request.sessionId,
@@ -1415,7 +1461,9 @@ class NotebookKernelExecutor implements NotebookExecutor {
         const nativeState =
           processOutcome.processState === 'never-started'
             ? processOutcome.processState
-            : await sandboxed?.confirmProcessState?.().catch(() => undefined)
+            : ownershipIntent?.record.windowsJobName && processOutcome.processesTerminated
+              ? 'started-and-reaped'
+              : await sandboxed?.confirmProcessState?.().catch(() => undefined)
         const state =
           nativeState ??
           processOutcome.processState ??
@@ -1448,7 +1496,8 @@ class NotebookKernelExecutor implements NotebookExecutor {
           kernelEpochId
         },
         ownerToken,
-        sandboxed?.processTreeProof
+        sandboxed?.processTreeProof,
+        this.platform === 'win32'
       )
     }
     const kernelExecutable = sandboxed?.executable ?? invocation.executable
@@ -1485,18 +1534,38 @@ class NotebookKernelExecutor implements NotebookExecutor {
       // No await may separate this check from spawn: settings mutations must not interleave
       // between validating the prepared launch and creating its process.
       spawnAdmission = sandboxed?.beginSpawn?.()
-      child = spawn(spawnExecutable, spawnArgs, {
+      const spawnOptions = {
         cwd: spawnCwd,
         env: effectiveSpawnEnv,
         // The desktop's Node backend has no console to inherit; hide the outer host too.
         windowsHide: true,
         // Persistent kernels own a private POSIX process group. This gives teardown a stable OS-level
         // container that remains addressable even when the loop leader exits before its descendants.
-        // Windows descendants are contained by the sandbox host's kill-on-close Job Object and the
-        // taskkill /T fallback used by terminateProcessTree.
-        detached: this.platform !== 'win32',
-        ...(rpcTokenFileDescriptor ? { stdio: ['pipe', 'pipe', 'pipe', 'pipe'] } : {})
-      })
+        // Windows production hosts are atomically contained in a durable named Job below.
+        detached: this.platform !== 'win32'
+      }
+      child = ownershipIntent?.record.windowsJobName
+        ? spawnWindowsOwnedProcess(
+            ownershipIntent.record.windowsJobName,
+            spawnExecutable,
+            spawnArgs,
+            {
+              ...spawnOptions,
+              stdio: 'pipe'
+            }
+          )
+        : spawn(spawnExecutable, spawnArgs, {
+            ...spawnOptions,
+            ...(rpcTokenFileDescriptor ? { stdio: ['pipe', 'pipe', 'pipe', 'pipe'] } : {})
+          })
+      const windowsJobName = ownershipIntent?.record.windowsJobName
+      if (windowsJobName) {
+        registerProcessTreeOwnership(child, {
+          terminate: async () => ({ reaped: await reapWindowsOwnedJob(windowsJobName) }),
+          // The executor settles its receipt only after sandbox/host termination proof agrees.
+          settled: () => {}
+        })
+      }
     } catch (error) {
       spawnAdmission?.notStarted()
       if (ownershipIntent) this.processLifecycle?.abandonSpawn(ownershipIntent)
@@ -1550,9 +1619,11 @@ class NotebookKernelExecutor implements NotebookExecutor {
     }
     const recordOwnership = (): void => {
       if (!ownershipIntent || child.pid === undefined || ownershipReceipt) return
+      const birthToken = capturePosixProcessTreeIdentity(child)?.birthToken
       ownershipReceipt = this.processLifecycle?.recordSpawned(ownershipIntent, {
         pid: child.pid,
         processStartToken: readProcessStartToken(child.pid),
+        ...(birthToken ? { posixBirthToken: birthToken } : {}),
         commandIdentityMarker: ownershipIntent.record.receiptId
       })
     }
@@ -1861,6 +1932,7 @@ class NotebookKernelExecutor implements NotebookExecutor {
           )
           for (const directory of protectedDirAdditions) proc.protectedDirs.add(directory)
         }
+        proc.lastCell = createNotebookCellPreview(request.code)
         onDispatch()
       } catch (error) {
         this.clearPendingResources(pending)
@@ -2089,7 +2161,10 @@ class NotebookKernelExecutor implements NotebookExecutor {
     proc: ProcState,
     reason: NotebookSandboxCleanupReason = 'cancel'
   ): Promise<ProcessTreeKillResult> {
-    const done = this.teardownProc(proc, reason)
+    proc.cleanupPending = true
+    const done = this.teardownProc(proc, reason).finally(() => {
+      proc.cleanupPending = false
+    })
     this.pendingTeardowns.set(proc.key, {
       completion: done,
       retry: () => this.killChildTracked(proc, reason),

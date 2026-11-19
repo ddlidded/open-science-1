@@ -44,6 +44,7 @@ type AcpProviderPromptExecutorOptions = Readonly<{
   backendGeneration: Pick<AcpBackendGenerationOwner, 'openCodeUsageApi'> &
     Readonly<{ current: Pick<AcpBackendGenerationOwner['current'], 'adapter'> }>
   opencodeUsageFetch?: typeof fetch
+  recoverOutputTruncation?: boolean
 }>
 
 type ProviderTurnObservationInput = Readonly<{
@@ -300,6 +301,8 @@ class AcpProviderPromptExecutor {
           input.routeNotification(message.notification)
           continue
         }
+        const providerError = adapter.getPromptError?.(message.response)
+        if (providerError) throw providerError
         if (!input.captureStop(message.response)) {
           await cancelProbe()
           return Object.freeze({ kind: 'superseded', response: message.response })
@@ -313,11 +316,18 @@ class AcpProviderPromptExecutor {
         } catch (error) {
           reportBestEffort(input.reportBestEffortFailure, 'finalize', error)
         }
+        // OpenCode v1 can return end_turn even when the model stopped at its output limit.
+        const response: PromptResponse =
+          this.options.recoverOutputTruncation &&
+          message.response.stopReason === 'end_turn' &&
+          facts.outputTruncated
+            ? { ...message.response, stopReason: 'max_tokens' }
+            : message.response
         return Object.freeze({
           kind: 'stopped',
-          response: message.response,
+          response,
           facts: withPreDispatchModelCalls(
-            normalizeFacts(message.response, facts),
+            normalizeFacts(response, facts),
             input.preDispatchModelCalls
           )
         })

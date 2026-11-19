@@ -447,6 +447,9 @@ describe('Session persistence coordinator architecture', () => {
         'assertSessionAvailable',
         'attachDelegatedMessageArtifacts',
         'cancelQuestions',
+        'cleanupRecoveredSession',
+        'reconcileRecoveryCatalog',
+        'recoveryCatalogGeneration',
         'clearSideChat',
         'commitSideChatRelays',
         'completeChildTurn',
@@ -462,6 +465,7 @@ describe('Session persistence coordinator architecture', () => {
         'listLegacyProjectSessionTombstones',
         'loadAll',
         'loadAllReadOnly',
+        'findSessionForContinuation',
         'loadSessionForContinuation',
         'loadPersistedSideChats',
         'markCommittedProjectSessionsPrepared',
@@ -475,6 +479,9 @@ describe('Session persistence coordinator architecture', () => {
         'withLiteratureAttachmentRemoval',
         'readSessionRuntimeContext',
         'readSessionSnapshot',
+        'prepareSessionRecovery',
+        'commitSessionRecovery',
+        'recoverStartupSession',
         'recoverInterruptedDelegatedWork',
         'replaceSessionMetadata',
         'repairProjectFiles',
@@ -492,6 +499,7 @@ describe('Session persistence coordinator architecture', () => {
         'setSessionDelegationPolicy',
         'setSessionDeletionHandlers',
         'setSessionEnabledComputeHosts',
+        'setSessionPinned',
         'settleMessage',
         'settleTaskCompletion',
         'bindTaskSession',
@@ -510,7 +518,13 @@ describe('Session persistence coordinator architecture', () => {
       ].sort()
     )
     expect(methods(facade, 'private')).toEqual(
-      ['assertMutable', 'notifyFilesChanged', 'notifySessionsDeleted', 'recordProblemKey'].sort()
+      [
+        'assertMutable',
+        'notifyFilesChanged',
+        'notifySessionsDeleted',
+        'recordProblemKey',
+        'withDeletionCleanup'
+      ].sort()
     )
     expect(publicNonMethodMembers(facade)).toEqual([])
 
@@ -547,6 +561,8 @@ describe('Session persistence coordinator architecture', () => {
         'ComputeJobDeletionParticipant',
         'DelegatedWorkRecordCommands',
         'PatchSessionRuntimeContextCommand',
+        'PreparedSessionRecovery',
+        'RecoveredSessionReference',
         'ProjectSessionDeletionResult',
         'PublishedSessionHandoff',
         'SessionCatalog',
@@ -577,6 +593,7 @@ describe('Session persistence coordinator architecture', () => {
         'delegatedStartupRecoveryComplete',
         'deletedProjects',
         'deletedSessions',
+        'pendingDeletionCleanups',
         'deletionOwner',
         'deletionWork',
         'destructiveStartupWindowOpen',
@@ -638,7 +655,6 @@ describe('Session persistence coordinator architecture', () => {
         'log',
         'notifyDiscussionDetached',
         'notifyFilesChanged',
-        'notifySessionsDeleted',
         'preparePackageDeletion',
         'provenance',
         'repository',
@@ -736,6 +752,7 @@ describe('Session persistence coordinator architecture', () => {
         'containsMessageOnActiveBranch',
         'deleteRecoveryFile',
         'failTaskRun',
+        'findSessionForContinuation',
         'loadSessionForContinuation',
         'mutateRuntimeSession',
         'mutateSessionComputeHostAccess',
@@ -743,10 +760,11 @@ describe('Session persistence coordinator architecture', () => {
         'patchSessionRuntimeContext',
         'readSessionRuntimeContext',
         'readSessionSnapshot',
+        'prepareSessionRecovery',
+        'commitSessionRecovery',
         'reserveSessionExport',
         'retryArtifactFinalization',
         'commitRecoveredArtifactReferences',
-        'runSessionMutation',
         'saveSession',
         'saveSessionSpecialistBinding',
         'saveSideChatProjection',
@@ -761,6 +779,7 @@ describe('Session persistence coordinator architecture', () => {
         'updateSessionConfiguration',
         'updateArchive'
       ],
+      runSessionProjectExclusive: ['runSessionMutation'],
       runSessionThenGlobalIfNeeded: ['deleteSession'],
       runSessionIdentity: ['sessionProjectId']
     }
@@ -780,7 +799,8 @@ describe('Session persistence coordinator architecture', () => {
           'clearSessionRecordProblem',
           'listSessionRecordProblems',
           'recordRuntimeTerminalFailure',
-          'projectRuntimeSession'
+          'projectRuntimeSession',
+          'recoveryCatalogGeneration'
         ].includes(name)
       ) {
         // Synchronous Main facts decorate projections; they never write durable Session state.
@@ -808,6 +828,58 @@ describe('Session persistence coordinator architecture', () => {
           ),
           name
         ).toEqual([`this.stateOwner.${name}`])
+        continue
+      }
+      if (name === 'cleanupRecoveredSession' || name === 'reconcileRecoveryCatalog') {
+        const text = method.getText(facadeFile)
+        expect(text).toContain(
+          name === 'cleanupRecoveredSession'
+            ? 'this.operationScheduler.runSessionRecovery'
+            : 'this.operationScheduler.runGlobal'
+        )
+        expect(text).toContain('this.recoveryCatalogGeneration() !== expectedGeneration')
+        expect(text).toContain('cancelled()')
+        continue
+      }
+      if (name === 'replaceSessionMetadata') {
+        const text = method.getText(facadeFile)
+        expect(text).toContain('this.recoveryCatalogGeneration() === expectedGeneration')
+        expect(text).toContain('this.operationScheduler.runGlobal')
+        expect(text).toContain('this.stateOwner.metadataSnapshot().sessions, false')
+        continue
+      }
+      if (name === 'recoverStartupSession') {
+        // Orchestration releases the lane between attempts; prepare and commit own their guards.
+        expect(method.getText(facadeFile)).not.toContain('this.operationScheduler.')
+        expect(method.getText(facadeFile)).not.toContain('this.repository.')
+        expect(method.getText(facadeFile)).toContain('this.prepareSessionRecovery(')
+        expect(method.getText(facadeFile)).toContain('this.commitSessionRecovery(')
+        continue
+      }
+      if (name === 'prepareSessionRecovery' || name === 'commitSessionRecovery') {
+        // Production preparation reads a non-mutating snapshot off-lane; only legacy readers use
+        // the scoped fallback. Commit revalidates before effectful reconciliation in that lane.
+        const calls = walk(method, isCallExpression)
+          .filter(isCallExpression)
+          .map((call) => call.expression.getText(facadeFile))
+        expect(calls.filter((call) => call.startsWith('this.operationScheduler.'))).toEqual([
+          name === 'prepareSessionRecovery'
+            ? 'this.operationScheduler.runSession'
+            : 'this.operationScheduler.runSessionRecovery'
+        ])
+        if (name === 'prepareSessionRecovery') {
+          expect(calledOwnerMethods(method)).toEqual([])
+          expect(calls.filter((call) => call.startsWith('this.repository.'))).toEqual([
+            'this.repository.loadSessionRecoverySnapshot',
+            'this.repository.loadSessionWithDiagnostics'
+          ])
+        } else {
+          expect(calledOwnerMethods(method)).toEqual([
+            'reconciliationOwner.reconcileLoadedSessions',
+            'stateOwner.ownsPromptPreparation',
+            'stateOwner.recordSession'
+          ])
+        }
         continue
       }
       if (name === 'projectRuntimeSessionSummaries') {
@@ -861,12 +933,40 @@ describe('Session persistence coordinator architecture', () => {
         expect(calls).toEqual(['this.operationScheduler.runSession'])
         continue
       }
+      if (name === 'setSessionPinned') {
+        // Pin delegates to the metadata authority method, which is independently required below
+        // to own the Session lane. Keep the exact scope forwarding and forbid a second write path.
+        expect(method.body?.statements, name).toHaveLength(1)
+        const authorityCalls = walk(method, isCallExpression)
+          .filter(isCallExpression)
+          .filter(
+            (call) =>
+              isPropertyAccessExpression(call.expression) &&
+              call.expression.expression.kind === SyntaxKind.ThisKeyword
+          )
+        expect(authorityCalls.map((call) => call.expression.getText(facadeFile))).toEqual([
+          'this.mutateSessionDetailsAuthority'
+        ])
+        expect(
+          authorityCalls[0].arguments.slice(0, 2).map((arg) => arg.getText(facadeFile))
+        ).toEqual(['request.projectId', 'request.sessionId'])
+        expect(authorityCalls[0].arguments).toHaveLength(3)
+        expect(isArrowFunction(authorityCalls[0].arguments[2])).toBe(true)
+        expect(calledOwnerMethods(method)).toEqual([])
+        expect(method.getText(facadeFile)).not.toContain('this.repository.')
+        expect(method.getText(facadeFile)).not.toContain('this.operationScheduler.')
+        expect(expectedSchedulerRoute.get('mutateSessionDetailsAuthority')).toBe('runSession')
+        continue
+      }
       const statements = method.body?.statements
+      const capturesQueueTime = name === 'loadAll' || name === 'loadAllReadOnly'
       if (name === 'adoptPublishedSession' || name === 'deleteRecoveryFile') {
         // The package publisher has a different scheduler. Snapshot its handoff synchronously
         // before this owner queues the ordinary read and catalog mutation in the Session lane.
         // Recovery deletion similarly validates and captures its untrusted identity before queuing.
-        expect(statements, name).toHaveLength(2)
+        expect(statements, name).toHaveLength(name === 'adoptPublishedSession' ? 3 : 2)
+        if (name === 'adoptPublishedSession')
+          expect(statements?.[1].getText(facadeFile)).toBe('this.hydrationCache.invalidate()')
         const capture = statements?.[0]
         expect(capture && isVariableStatement(capture)).toBe(true)
         expect(capture?.getText(facadeFile)).toBe(
@@ -874,11 +974,21 @@ describe('Session persistence coordinator architecture', () => {
             ? 'const { projectId, sessionId, session, pendingProjectImport } = structuredClone(publication)'
             : 'const validated = deleteSessionRecoveryFileRequestSchema.parse(request)'
         )
+      } else if (capturesQueueTime) {
+        // Capture the enqueue clock only; all authority work must still enter the global lane.
+        expect(statements, name).toHaveLength(2)
+        expect(statements?.[0].getText(facadeFile)).toBe('const queuedAt = performance.now()')
       } else {
         expect(statements, name).toHaveLength(1)
       }
       const statement =
-        statements?.[name === 'adoptPublishedSession' || name === 'deleteRecoveryFile' ? 1 : 0]
+        statements?.[
+          name === 'adoptPublishedSession'
+            ? 2
+            : name === 'deleteRecoveryFile' || capturesQueueTime
+              ? 1
+              : 0
+        ]
       expect(statement, name).toBeDefined()
       if (!statement) continue
       expect(isReturnStatement(statement), name).toBe(true)
@@ -916,7 +1026,7 @@ describe('Session persistence coordinator architecture', () => {
       expect(methods(owner, 'private')).not.toContain('enqueue')
     }
 
-    expect(expectedSchedulerRoute.size).toBe(51)
+    expect(expectedSchedulerRoute.size).toBe(54)
     const constructorSource = facade.members.filter(isConstructorDeclaration)[0].getText(facadeFile)
     expect(constructorSource).toContain('this.operationScheduler.runSession(')
     expect(constructorSource).toContain('this.operationScheduler.runGlobal(work)')
@@ -1114,6 +1224,10 @@ describe('Session persistence coordinator architecture', () => {
     expect(methods(reconciliationOwner, 'public')).toEqual(
       [
         'commitRecoveredArtifacts',
+        'cleanupVersionedUploadSources',
+        'planOrphanStagingCleanup',
+        'planNativeCleanup',
+        'reconcileCatalogIdentities',
         'reconcileLoadedSessions',
         'repairFileProjection',
         'retryArtifactFinalization'
@@ -1172,7 +1286,12 @@ describe('Session persistence coordinator architecture', () => {
       patchSessionRuntimeContext: ['stateOwner.patchRuntimeContext'],
       pruneSessionEnabledComputeHosts: ['stateOwner.pruneEnabledComputeHosts'],
       readSessionRuntimeContext: ['stateOwner.readRuntimeContext'],
-      replaceSessionMetadata: ['stateOwner.replaceMetadata'],
+      replaceSessionMetadata: [
+        'stateOwner.metadataSnapshot',
+        'stateOwner.replaceMetadata',
+        'stateOwner.replaceMetadata',
+        'stateOwner.replaceMetadata'
+      ],
       saveSession: [
         'stateOwner.assertRuntimeTerminalWriteAvailable',
         'stateOwner.listRuntimeTerminalFailures',
@@ -1301,6 +1420,8 @@ describe('Session persistence coordinator architecture', () => {
       'src/main/session-persistence/projection-diagnostics.test.ts',
       'src/main/session-persistence/projection-diagnostics.ts',
       'src/main/session-persistence/projection.test.ts',
+      'src/main/session-persistence/startup-hydration.integration.test.ts',
+      'src/main/session-persistence/recovery-commit.integration.test.ts',
       'src/main/session-persistence/projection.ts',
       'src/main/session-persistence/renderer-flush.test.ts',
       'src/main/session-persistence/renderer-flush.ts',
@@ -1343,7 +1464,23 @@ describe('Session persistence coordinator architecture', () => {
       'src/main/session-persistence/attention-projection.test.ts',
       'src/main/session-persistence/turn-outcome-authority.test.ts',
       'src/main/session-persistence/flush-protocol.ts',
-      'src/main/session-persistence/conversation-pdf-electron.ts'
+      'src/main/session-persistence/conversation-pdf-electron.ts',
+      'src/main/session-persistence/history-legacy-formats.integration.test.ts',
+      'src/main/session-persistence/history-projection.test.ts',
+      'src/main/session-persistence/history-projection.ts',
+      'src/main/session-persistence/history-repository.integration.test.ts',
+      'src/main/session-persistence/official-science-runtime-storage.benchmark.test.ts',
+      'src/main/session-persistence/official-science-storage.benchmark.test.ts',
+      'src/main/session-persistence/projection-incremental.test.ts',
+      'src/main/session-persistence/realistic-session-storage.benchmark.test.ts',
+      'src/main/session-persistence/repository-journal-compatibility.test.ts',
+      'src/main/session-persistence/repository-pending-import.test.ts',
+      'src/main/session-persistence/runtime-business-records.integration.test.ts',
+      'src/main/session-persistence/runtime-session-file.test.ts',
+      'src/main/session-persistence/runtime-session-file.ts',
+      'src/main/session-persistence/runtime-session-mutation.ts',
+      'src/main/session-persistence/session-storage-benchmark.test.ts',
+      'src/main/session-persistence/deferred-recovery.ts'
     ])
     expect(sessionPersistence.interfacePaths).toEqual([
       'src/main/session-persistence/coordinator.ts',
@@ -1372,7 +1509,10 @@ describe('Session persistence coordinator architecture', () => {
       'src/main/session-persistence/runtime-session-owner.ts',
       'src/main/session-persistence/runtime-writer.ts',
       'src/main/session-persistence/flush-protocol.ts',
-      'src/main/session-persistence/conversation-pdf-electron.ts'
+      'src/main/session-persistence/conversation-pdf-electron.ts',
+      'src/main/session-persistence/runtime-session-file.ts',
+      'src/main/session-persistence/runtime-session-mutation.ts',
+      'src/main/session-persistence/deferred-recovery.ts'
     ])
     expect(sessionPersistence.consumerModules).toEqual(['project_lifecycle'])
     expect(sessionPersistence.testFiles.owner).toEqual([
@@ -1392,6 +1532,8 @@ describe('Session persistence coordinator architecture', () => {
       'src/main/session-persistence/pdf-context-owner.test.ts',
       'src/main/session-persistence/projection-diagnostics.test.ts',
       'src/main/session-persistence/projection.test.ts',
+      'src/main/session-persistence/startup-hydration.integration.test.ts',
+      'src/main/session-persistence/recovery-commit.integration.test.ts',
       'src/main/session-persistence/renderer-flush.test.ts',
       'src/main/session-persistence/renderer-save-options.test.ts',
       'src/main/session-persistence/repository-queue.test.ts',
@@ -1416,7 +1558,19 @@ describe('Session persistence coordinator architecture', () => {
       'src/main/session-persistence/terminal-live-projection.test.ts',
       'src/main/session-persistence/turn-outcome-reconciliation.test.ts',
       'src/main/session-persistence/attention-projection.test.ts',
-      'src/main/session-persistence/turn-outcome-authority.test.ts'
+      'src/main/session-persistence/turn-outcome-authority.test.ts',
+      'src/main/session-persistence/history-legacy-formats.integration.test.ts',
+      'src/main/session-persistence/history-projection.test.ts',
+      'src/main/session-persistence/history-repository.integration.test.ts',
+      'src/main/session-persistence/official-science-runtime-storage.benchmark.test.ts',
+      'src/main/session-persistence/official-science-storage.benchmark.test.ts',
+      'src/main/session-persistence/projection-incremental.test.ts',
+      'src/main/session-persistence/realistic-session-storage.benchmark.test.ts',
+      'src/main/session-persistence/repository-journal-compatibility.test.ts',
+      'src/main/session-persistence/repository-pending-import.test.ts',
+      'src/main/session-persistence/runtime-business-records.integration.test.ts',
+      'src/main/session-persistence/runtime-session-file.test.ts',
+      'src/main/session-persistence/session-storage-benchmark.test.ts'
     ])
     expect(sessionPersistence.testFiles.contract).toEqual([
       'src/shared/session-persistence.test.ts',

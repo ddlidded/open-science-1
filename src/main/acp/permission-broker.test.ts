@@ -39,6 +39,8 @@ const permissionRoutes: PermissionPolicyContext[] = [
   { profile: 'ask', frameworkId: 'opencode', modelRoute: 'opencode-anthropic' },
   { profile: 'ask', frameworkId: 'opencode', modelRoute: 'opencode-openai' },
   { profile: 'ask', frameworkId: 'codebuddy', modelRoute: 'codebuddy-openai' },
+  { profile: 'ask', frameworkId: 'pi', modelRoute: 'pi' },
+  { profile: 'ask', frameworkId: 'open-science-agent', modelRoute: 'open-science-agent' },
   { profile: 'ask', frameworkId: 'codex', modelRoute: 'codex-responses' },
   { profile: 'ask', frameworkId: 'codex', modelRoute: 'codex-responses-compatibility' },
   { profile: 'ask', frameworkId: 'codex', modelRoute: 'codex-bridge' }
@@ -63,6 +65,33 @@ const createPermissionRequest = (sessionId = 'session-1'): RequestPermissionRequ
     { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
     { optionId: 'reject-once', name: 'Reject once', kind: 'reject_once' }
   ]
+})
+
+it.each(['generate_image', 'edit_image'])('asks once per %s call in Ask mode', async (tool) => {
+  const emit = vi.fn()
+  const grants = new ConversationPermissionGrantStore()
+  const identity = `open-science-images/${tool}`
+  const request = withTrustedMcpToolIdentity(createPermissionRequest(), identity)
+  grants.remember(request.sessionId, `mcp:${identity}`)
+  const broker = new AcpPermissionBroker(emit, grants)
+  const context = { profile: 'ask' as const, mcpServerNames: ['open-science-images'] }
+
+  await expect(broker.requestPermission(request, { ...context, profile: 'auto' })).resolves.toEqual(
+    {
+      outcome: { outcome: 'selected', optionId: 'allow-once' }
+    }
+  )
+  expect(emit).not.toHaveBeenCalled()
+
+  const waiting = broker.requestPermission(request, context)
+  const pending = broker.getPendingRequests()[0]
+  expect(emit).toHaveBeenCalledOnce()
+  expect(pending.mcpIdentity).toBe(identity)
+  expect(pending.options).toEqual([{ ...request.options[0], scope: 'once' }, request.options[1]])
+  await broker.respond({ requestId: pending.requestId, optionId: 'reject-once' })
+  await expect(waiting).resolves.toEqual({
+    outcome: { outcome: 'selected', optionId: 'reject-once' }
+  })
 })
 
 describe('issue #3284 shared permission boundary', () => {
@@ -540,6 +569,52 @@ describe('issue #3284 permission rejection', () => {
 })
 
 describe('ACP permission broker', () => {
+  it.each(permissionRoutes)(
+    'allows scoped Schedule calls in Auto and limits unattended Ask calls on $modelRoute',
+    async (route) => {
+      const emit = vi.fn()
+      const persist = vi.fn(async () => true)
+      const broker = new AcpPermissionBroker(emit, undefined, undefined, undefined, {
+        persist,
+        settleLive: vi.fn()
+      })
+      for (const tool of [
+        'list_schedules',
+        'manage_current_schedule',
+        'create_schedule',
+        'update_schedule',
+        'close_schedule'
+      ]) {
+        const raw = createToolPermissionRequest({
+          providerToolName: 'mcp__open_science_schedule__' + tool,
+          kind: 'other',
+          rawInput: {}
+        })
+        const request = withTrustedMcpToolIdentity(raw, 'open-science-schedule/' + tool)
+        await expect(
+          broker.requestPermission(request, {
+            ...route,
+            profile: 'auto',
+            mcpServerNames: ['open-science-schedule']
+          })
+        ).resolves.toMatchObject({ outcome: { outcome: 'selected', optionId: 'allow-once' } })
+        const response = await broker.requestPermission(request, {
+          ...route,
+          permissionPrompts: 'none',
+          mcpServerNames: ['open-science-schedule']
+        })
+        expect(response.outcome).toEqual({
+          outcome: 'selected',
+          optionId: ['list_schedules', 'manage_current_schedule'].includes(tool)
+            ? 'allow-once'
+            : 'reject-once'
+        })
+      }
+      expect(emit).not.toHaveBeenCalled()
+      expect(persist).not.toHaveBeenCalled()
+      expect(broker.getPendingRequests()).toEqual([])
+    }
+  )
   it.each(permissionRoutes)(
     'denies unapproved $modelRoute tools without parking or persisting unattended work',
     async ({ frameworkId, modelRoute }) => {

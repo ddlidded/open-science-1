@@ -5,7 +5,6 @@ import {
   type DiagnosticOperation
 } from '@aipoch/diagnostics/node'
 import { hasImmutableExecutionFileEvidenceReference } from '../../shared/execution-file-evidence'
-import type { LoadAllSessionsResult } from '../../shared/session-persistence'
 import { type ApplicationModuleBuilder } from '../application-runtime'
 import { ComputeJobResultDeliveryAdapter } from '../background-result-delivery/compute-adapter'
 import { broadcastJobUpdated, createComputeIpcModule, toJobSummary } from '../compute/ipc'
@@ -16,14 +15,11 @@ import {
   recoverPublishedComputeJobFileEvidence,
   settleComputeJobFileEvidence
 } from '../notebook/working-file-observer'
-import { selectSessionDetailsStartupCandidates } from '../session-details/startup-catalog'
 import { resolveDataRoot } from '../storage-root'
 
 export async function composeComputeRecovery({
   markComputeResultAuthorityReady,
   computeJobResultDelivery,
-  loadAllSessions,
-  startupSessionDetails,
   computeIpcModule,
   computeService,
   connectionBroker,
@@ -31,14 +27,13 @@ export async function composeComputeRecovery({
   jobRepository,
   operationRepository,
   hostRepository,
+  beginStartupProjection,
   dataRoot,
   modules,
   composition
 }: {
   markComputeResultAuthorityReady: () => void
   computeJobResultDelivery: ComputeJobResultDeliveryAdapter
-  loadAllSessions: () => Promise<LoadAllSessionsResult>
-  startupSessionDetails: { current: LoadAllSessionsResult['sessions'] | undefined }
   computeIpcModule: ReturnType<typeof createComputeIpcModule>
   computeService: ReturnType<typeof createComputeIpcModule>['computeService']
   connectionBroker: import('../compute/connection-broker').ComputeConnectionBroker
@@ -46,13 +41,14 @@ export async function composeComputeRecovery({
   jobRepository: import('../compute/job-repository').ComputeJobRepository
   operationRepository: import('../compute/compute-job-operation-repository').ComputeJobOperationRepository
   hostRepository: import('../compute/repository').ComputeHostRepository
+  beginStartupProjection: () => Promise<unknown>
   dataRoot: ReturnType<typeof resolveDataRoot>
   modules: ApplicationModuleBuilder
   composition: DiagnosticOperation
 }): Promise<void> {
   // Start the JobPoller wired to the shared broadcaster only after Project runtime quiescence and
-  // Side Chat ownership are available. Queue startup loads the Session catalog, which may first need
-  // to finish a pending Project deletion through those owners before restoring concurrency limits.
+  // Side Chat ownership are available. Session Details recovery is local to the Session the user
+  // opens, so idle history does not participate in startup readiness.
   await modules.add(
     {
       computeService,
@@ -91,6 +87,7 @@ export async function composeComputeRecovery({
           })()
         }
       })
+      let disposed = false
       return {
         name: 'compute-job-runtime',
         capability: undefined,
@@ -158,25 +155,31 @@ export async function composeComputeRecovery({
           } finally {
             markComputeResultAuthorityReady()
           }
-          // Catalog hydration also restores non-Compute projections and enabled Host selections.
-          // Keep those startup effects, but never make dispatch depend on catalog completeness.
-          composition.phase('session-catalog')
-          await Promise.all([
-            jobPoller.start(),
-            loadAllSessions()
-              .then((catalog) => {
-                startupSessionDetails.current = selectSessionDetailsStartupCandidates(catalog)
-              })
-              .catch((error) => {
-                createLogger('session-persistence').warn(
-                  'Startup Session hydration failed',
-                  errorLogFields(error)
-                )
-              })
-          ])
+          // Session catalog hydration owns Compute Host access reconciliation. Start it in the
+          // background so a large historical catalog cannot delay backend readiness, then start
+          // polling after that shared load has completed.
+          void (async () => {
+            try {
+              await beginStartupProjection()
+            } catch (error) {
+              createLogger('compute:session-hydration').warn(
+                'Session catalog hydration failed; Compute polling will continue.',
+                diagnosticErrorFields(error)
+              )
+            }
+            if (!disposed) await jobPoller.start()
+          })().catch((error) => {
+            createLogger('compute:job-polling').warn(
+              'Compute polling startup failed.',
+              diagnosticErrorFields(error)
+            )
+          })
         },
         disposeTimeoutMs: QUIT_SHUTDOWN_BUDGET_MS,
-        dispose: () => jobPoller.stop()
+        dispose: async () => {
+          disposed = true
+          await jobPoller.stop()
+        }
       }
     }
   )
