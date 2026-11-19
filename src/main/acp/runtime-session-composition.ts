@@ -319,6 +319,8 @@ const composeAcpRuntimeSessionOwners = (options: AcpRuntimeOptions, base: AcpRun
       currentInteractionSequence: (sessionId) =>
         base.sessionInteractions.current(sessionId)?.sequence,
       mcpServerNamesFor: (sessionId) => base.sessionCapabilities.mcpServerNamesFor(sessionId),
+      webToolOperationFor: (sessionId, identity) =>
+        base.sessionCapabilities.webToolOperationFor(sessionId, identity),
       piPermissionContextFor,
       authorizeRuntimeBindingAdmission: options.notebook?.authorizeRuntimeBindingAdmission,
       canOwnRuntimeBindingDecision: options.notebook?.canOwnRuntimeBindingDecision,
@@ -468,6 +470,8 @@ const composeAcpRuntimeSessionOwners = (options: AcpRuntimeOptions, base: AcpRun
     permission: permissionContext
   })
   const sessionUpdateProjector = new AcpSessionUpdateProjector({
+    webToolOperationFor: (sessionId, identity) =>
+      base.sessionCapabilities.webToolOperationFor(sessionId, identity),
     separateProviderNotices: options.separateProviderNotices,
     registry: sessionRegistry,
     contextUsage: base.contextUsageTracker,

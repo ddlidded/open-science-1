@@ -14,6 +14,7 @@ import {
   configuredModelKey
 } from '../../../shared/configured-model-catalog'
 import type { PackageMirror } from '../../../shared/mirror'
+import type { LabView } from '../../../shared/lab'
 import type { ModelProtocol, OfficialVendorId } from '@aipoch/providers'
 import type { ReasoningEffort } from '../../../shared/model-preference-contract'
 import {
@@ -120,6 +121,9 @@ type SettingsStoreData = RuntimeSetupState &
     // Active model within the active provider; undefined means the provider's own default.
     activeModel: string | undefined
     providers: ProviderView[]
+    // Optional Lab enterprise connection status projected by main. Absent when the feature is not
+    // configured; never carries credentials.
+    lab: LabView | undefined
     // Selected agent backend and the frameworks available to choose from.
     agentFrameworkId: AgentFrameworkId
     agentFrameworks: AgentFrameworkView[]
@@ -203,6 +207,7 @@ export const createInitialSettingsState = (): SettingsStoreData => ({
   claudeSubscriptionProviderId: undefined,
   activeModel: undefined,
   providers: [],
+  lab: undefined,
   agentFrameworkId: DEFAULT_AGENT_FRAMEWORK_ID,
   agentFrameworks: [],
   opencode: {},
@@ -247,6 +252,7 @@ const applySnapshot = (snapshot: SettingsSnapshot): Partial<SettingsStoreData> =
   claudeSubscriptionProviderId: snapshot.claudeSubscriptionProviderId,
   activeModel: snapshot.activeModel,
   providers: snapshot.providers,
+  lab: snapshot.lab,
   onboardingCompletedAt: snapshot.onboardingCompletedAt,
   packageMirror: isMirrorConfigured(snapshot.packageMirror) ? snapshot.packageMirror : undefined,
   networkProxy: snapshot.networkProxy ?? DEFAULT_NETWORK_PROXY_SETTINGS,

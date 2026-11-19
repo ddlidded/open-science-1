@@ -14,6 +14,7 @@ import {
   isCodexSubscriptionProvider,
   type ProviderType
 } from './settings'
+import { readLabModelCapabilities, type LabModelCapabilities } from './lab'
 
 export type ProviderReasoningEffortSource = {
   type: ProviderType
@@ -23,6 +24,7 @@ export type ProviderReasoningEffortSource = {
   region?: string
   modelCatalog?: CatalogSnapshot
   reasoningEffortPreset?: ReasoningEffortPresetSetting
+  modelCapabilities?: Readonly<Record<string, LabModelCapabilities>>
 }
 
 // Resolves the effective selection with the same rules in main and renderer. Subscription runtimes
@@ -35,7 +37,10 @@ export const resolveProviderEffectiveModel = (
   if (!provider) return undefined
 
   const availableModels = provider.models ?? []
-  if (provider.type === 'official' && provider.modelCatalog && availableModels.length === 0) {
+  if (
+    (provider.type === 'lab' || (provider.type === 'official' && provider.modelCatalog)) &&
+    availableModels.length === 0
+  ) {
     return undefined
   }
   if (
@@ -102,6 +107,16 @@ export const resolveProviderReasoningEffortProfile = (
     // provider transport.
     case 'devin':
       return resolveReasoningEffortProfile(provider.reasoningEffortPreset)
+    case 'lab': {
+      const capabilities = readLabModelCapabilities(
+        model ? provider.modelCapabilities?.[model] : undefined
+      )
+      return reasoningProfileFromCapability({
+        supported: true,
+        values:
+          capabilities?.reasoningValues ?? (capabilities?.reasoningToggle ? ['none', 'high'] : [])
+      })
+    }
     case 'custom':
       return resolveReasoningEffortProfile(provider.reasoningEffortPreset)
   }

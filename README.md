@@ -51,18 +51,18 @@
   <a href="./docs/es/README.md"><img alt="Español README" src="https://img.shields.io/badge/Español-d9d9d9"></a>
 </p>
 
-### 💡 AIPOCH Open-Science v1.3.0 updates
+### 💡 AIPOCH Open-Science v1.3.1 updates
 
-_November 18, 2026_
+_November 19, 2026_
 
-- **Scheduled research tasks**: Set recurring or one-time schedules that launch sessions and Notebook tasks on their own — every run opens in the workspace with its own record.
-- **Image generation & editing**: Generate images with your configured provider and iterate with follow-up edits; every variant is a new version you can compare, revisit, and reuse.
-- **Editable presentations**: PowerPoint files open for in-place text editing — fonts, sizes, colors, and alignment — while the slide structure stays intact.
-- **Films, replayed**: Replay film operations onto new branches with independent outputs, open films straight from the session menu, and see token usage before you generate.
-- **Smarter agent questions**: When the agent asks for input, options now lay out their trade-offs so you can decide with the consequences in view.
-- **Reliability & speed**: Long session histories persist incrementally, stalled film and package transfers recover on their own, Windows installs and updates get leaner, and the app reaches your project sooner at startup.
+- **Web search & page reading**: The built-in agent can search the web and read public pages; search approvals show the query in a readable card, and cited sources stay with the conversation.
+- **Citation graph**: Explore a paper's references and citing papers as an interactive graph — re-center on any related paper and filter by direction.
+- **MCP without opening the app**: Connecting an external agent through MCP starts the Open-Science service for you, with setup options for more than 30 agents and clients.
+- **Lab models & organization cases**: Sign in with a Lab account to use your organization's models and to search, import, or share research cases with teammates.
+- **Fresh model lists & clearer errors**: Refresh a provider's model list from Settings, and see the cause and next step when a provider request fails.
+- **Updating from 1.3.0**: If the 1.3.0 updater reports that another process is using the installation, fully quit Open-Science and install the downloaded package manually.
 
-[View the full v1.3.0 release notes](https://github.com/aipoch/open-science/releases/tag/v1.3.0)
+[View the full v1.3.1 release notes](https://github.com/aipoch/open-science/releases/tag/v1.3.1)
 
 <a id="share-your-research"></a>
 
@@ -144,6 +144,69 @@ The former Model settings tab is now **Local capabilities**, covering PDF extrac
 3. Review tool activity and any approval requests, preview the results, and check their available evidence in **Provenance**.
 
 > Screenshots in this README illustrate the workflow. Labels, catalogs, and other interface details may differ from the version you install.
+
+### Connect your own agent through MCP
+
+If your agent can configure local MCP servers, copy this prompt into its chat:
+
+> Follow https://github.com/aipoch/open-science#connect-your-own-agent-through-mcp to connect this client to Open-Science and list my projects. Ask me to sign in only when an operation I request needs it.
+
+Choose your agent to see its setup options. For clients with local command access, the Open-Science CLI is also available.
+
+<p>
+  <a href="packages/open-science/CLI.md#choose-your-agent"><img src="docs/images/readme/agent-harnesses/workbuddy.svg" width="144" height="34" alt="WorkBuddy" /></a>
+  <a href="packages/open-science/CLI.md#choose-your-agent"><img src="docs/images/readme/agent-harnesses/codex.svg" width="144" height="34" alt="Codex CLI" /></a>
+  <a href="packages/open-science/CLI.md#choose-your-agent"><img src="docs/images/readme/agent-harnesses/claude-code.svg" width="144" height="34" alt="Claude Code" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/opencode.svg" width="144" height="34" alt="OpenCode" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/hermes.svg" width="144" height="34" alt="Hermes" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/antigravity.svg" width="144" height="34" alt="Antigravity" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/gemini.svg" width="144" height="34" alt="Gemini CLI" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/grok-build.svg" width="144" height="34" alt="Grok Build" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/kimi.svg" width="144" height="34" alt="Kimi CLI" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/cursor.svg" width="144" height="34" alt="Cursor Agent" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/qwen.svg" width="144" height="34" alt="Qwen Code" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/qoder.svg" width="144" height="34" alt="Qoder CLI" /></a>
+  <a href="packages/open-science/CLI.md#choose-your-agent"><img src="docs/images/readme/agent-harnesses/copilot.svg" width="144" height="34" alt="GitHub Copilot" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/pi.svg" width="144" height="34" alt="Pi" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/kiro.svg" width="144" height="34" alt="Kiro CLI" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/kilo.svg" width="144" height="34" alt="Kilo" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/vibe.svg" width="144" height="34" alt="Mistral Vibe" /></a>
+  <a href="packages/open-science/CLI.md#choose-your-agent"><img src="docs/images/readme/agent-harnesses/deepseek.svg" width="144" height="34" alt="DeepSeek TUI / Harness" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/reasonix.svg" width="144" height="34" alt="Reasonix" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/aider.svg" width="144" height="34" alt="Aider" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/devin.svg" width="144" height="34" alt="Devin" /></a>
+  <a href="packages/open-science/CLI.md#other-local-clients"><img src="docs/images/readme/agent-harnesses/trae.svg" width="144" height="34" alt="Trae CLI" /></a>
+</p>
+
+Also listed in the [local client guide](packages/open-science/CLI.md#other-local-clients): Amp, AtomCode, Claude Desktop, Cline, CodeBuddy, MiMo, OpenClaw, Raven and Vela.
+
+Connecting starts the standalone Open-Science service or reuses the one already running for
+your profile. You can open the desktop app later. The published 1.3.0 CLI requires an existing
+service; with that version, open Open-Science or run `npx --yes @aipoch/open-science@1.3.0 start --no-open` first.
+
+In your agent client's custom MCP settings, add a local **stdio** server. For clients that
+accept `mcpServers` JSON, use the following macOS/Linux configuration with Node.js 22.13.0
+or later and npm on the client's PATH:
+
+```json
+{
+  "mcpServers": {
+    "open-science": {
+      "command": "npx",
+      "args": ["--yes", "@aipoch/open-science@latest", "mcp"]
+    }
+  }
+}
+```
+
+On Windows, set `"command": "cmd.exe"` and use
+`"args": ["/d", "/c", "npx", "--yes", "@aipoch/open-science@latest", "mcp"]`
+so the client can launch npm's command shim.
+
+Ask your agent to **list my Open-Science projects**. A successful `list_projects` call
+confirms it can reach your profile, even if the list is empty. You can then submit a research
+task and check its results from the agent or Open-Science. See the [MCP guide](packages/open-science/CLI.md#external-agents-through-mcp)
+for custom profiles, available tools and permissions.
 
 <a id="core-capabilities"></a>
 
