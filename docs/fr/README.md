@@ -53,18 +53,18 @@
 
 > Ce document est une traduction de `README.md` en anglais. En cas de divergence, la [version anglaise](../../README.md) fait foi.
 
-### 💡 AIPOCH Open-Science v1.3.1 — Nouveautés
+### 💡 AIPOCH Open-Science v1.3.2 — Nouveautés
 
 _19 novembre 2026_
 
-- **Recherche web et lecture de pages**: L’agent intégré peut rechercher sur le web et lire des pages publiques ; les approbations de recherche affichent la requête dans une carte lisible, et les sources citées restent attachées à la conversation.
-- **Graphe de citations**: Explorez les références d’un article et les articles qui le citent sous forme de graphe interactif — recentrez sur n’importe quel article lié et filtrez par sens de citation.
-- **MCP sans ouvrir l’application**: Connecter un agent externe via MCP démarre le service Open-Science pour vous, avec des options de configuration pour plus de 30 agents et clients.
-- **Modèles Lab et cas d’organisation**: Connectez-vous avec un compte Lab pour utiliser les modèles de votre organisation et rechercher, importer ou partager des cas de recherche avec vos collègues.
-- **Listes de modèles à jour et erreurs plus claires**: Actualisez la liste des modèles d’un fournisseur depuis les Paramètres, et voyez la cause et l’étape suivante quand une requête au fournisseur échoue.
-- **Mise à jour depuis la 1.3.0**: Si le programme de mise à jour de la 1.3.0 signale qu’un autre processus utilise l’installation, quittez complètement Open-Science et installez manuellement le paquet téléchargé.
+- **Conversations longues plus légères**: Les réponses diffusées ne s’accumulent plus dans des entrées masquées, et le contenu des conversations que vous ne consultez pas est libéré dès qu’il est sûrement enregistré — les grandes sessions restent fluides sans perdre votre place.
+- **Kilo Gateway**: Ajoutez Kilo comme fournisseur officiel avec ou sans clé d’API — une actualisation anonyme du catalogue affiche les modèles gratuits accessibles depuis votre connexion, et l’intégration peut ignorer l’étape du fournisseur pour décider plus tard.
+- **Catalogues de modèles d’image**: Actualisez la liste de modèles fournie pour les services d’image officiels OpenAI, MiniMax, Bailian et Volcengine Ark avant l’enregistrement, en conservant votre modèle actif s’il est encore disponible.
+- **Premiers messages d’agent fiables**: Les nouvelles conversations avec l’Agent par défaut, Claude Code et Codex n’échouent plus avant leur première requête au modèle, et l’Agent intégré démarre les sessions planifiées avec leur prompt prévu.
+- **La traduction PDF conserve la mise en page**: Les titres, légendes, définitions et énoncés mathématiques encapsulés sont récupérés dans l’ordre de lecture, et les formules, liens et graphiques restent à leur place d’origine.
+- **Échecs de téléchargement plus clairs**: L’écran d’accueil indique la raison précise d’un échec de téléchargement d’un cas d’utilisation — manifeste manquant, paquet indisponible, délai dépassé, réseau, serveur, vérification, disque plein ou problème de stockage.
 
-[Notes complètes v1.3.1](https://github.com/aipoch/open-science/releases/tag/v1.3.1)
+[Notes complètes v1.3.2](https://github.com/aipoch/open-science/releases/tag/v1.3.2)
 
 <a id="share-your-research"></a>
 
@@ -89,6 +89,14 @@ Ouvrez la [page officielle de téléchargement](https://aipoch.com/open-science/
 | Linux ARM64                                   | AppImage ou paquet Debian Linux ARM64    |
 
 Consultez la [vérification du téléchargement](../../SECURITY.md#verifying-your-download) pour les contrôles avant installation.
+
+Sous Windows 10/11 x64, vous pouvez installer l’application de bureau depuis le [Microsoft Store](https://apps.microsoft.com/detail/XP99DM5G64X10X) ou utiliser WinGet dans PowerShell.
+
+```powershell
+winget install --id AIPOCH.Open-Science --exact --source winget
+```
+
+La version disponible peut varier selon le canal de distribution. Consultez le [guide d’installation et de mise à jour](https://aipoch.com/docs/guides/installation/) pour en savoir plus.
 
 Les archives de la CLI autonome pour macOS, Linux et Windows incluent Node.js et s’utilisent sans Homebrew ni npm.
 
@@ -172,6 +180,7 @@ AIPOCH a évalué AIPOCH Open-Science sur des tâches allant de la recherche d�
 | Répondre à partir de la littérature         | LitQA2-FullText        | Lors d’un essai distinct sur LitQA2-FullText, Open-Science a répondu correctement à **70 questions sur 75** (**93.33% d’exactitude**, deepseek-flash avec raisonnement Max).                                |
 | Produire une synthèse avec citations        | ScholarQA-CS2          | Sur 100 questions de validation de ScholarQA-CS2, Open-Science a obtenu un **score composite de qualité de 0.9289/1** avec deepseek-v4-flash. Les références du test officiel utilisent d’autres questions. |
 | Exécuter des workflows de recherche         | ASI-Bench              | Lors d’essais locaux ASI-Bench avec le même modèle, Open-Science a obtenu **59.46** en B4 et Codex **55.45**. Les scores B2 étaient presque identiques (**56.11** et **56.09**).                            |
+| Reproduire des expériences ML/NLP           | AstaBench SUPER-Expert | **46.30%** sur output_match/mean lors d’un essai local de 45 tâches avec DeepSeek Flash/Max.                                                                                                                |
 | Exécuter des tâches scientifiques           | TB-Science 0.1         | Sur 70 tâches, **145/210** essais locaux réussis (**69.05%**) avec GPT-6 Astra/max. Ni rang officiel ni relevés individuels publics.                                                                        |
 | Analyser des données biomédicales           | BiomniBench-DA         | Sur BiomniBench-DA Public 50, deux modèles juges ont attribué **81.04** et **77.06** aux résultats. Leur moyenne à poids égaux était de **79.05**.                                                          |
 | Reproduire des résultats publiés            | CORE-Bench-Hard        | CORE-Bench-Hard — 36 tâches de test sur 37 réussies en local (97,30 %), nouveaux essais compris.                                                                                                            |
@@ -182,7 +191,7 @@ AIPOCH a évalué AIPOCH Open-Science sur des tâches allant de la recherche d�
 
 **Périmètre de l’évaluation :** ces rapports couvrent des essais locaux ou internes d’août à novembre 2026, avec les modèles et partitions indiqués ; ils n’ont pas été réexécutés pour la version actuelle. Les références sont des instantanés historiques, pas des classements en direct. Les scores de familles de benchmarks différentes ne sont pas directement comparables, et les écarts numériques ne prouvent pas une significativité statistique.
 
-Consultez le [rapport AstaBench et ASI-Bench](https://aipoch.com/benchmark/open-science) et le [rapport BiomniBench-DA](https://aipoch.com/blog/open-science-biomnibench-da) pour les détails. Voir aussi le [résultat local TB-Science 0.1](https://aipoch.com/blog/aipoch-open-science-terminal-bench-science-local-result).
+Consultez le [rapport AstaBench et ASI-Bench](https://aipoch.com/benchmark/open-science) et le [rapport BiomniBench-DA](https://aipoch.com/blog/open-science-biomnibench-da) pour les détails. Voir aussi le [résultat local TB-Science 0.1](https://aipoch.com/blog/aipoch-open-science-terminal-bench-science-local-result). Voir aussi le [résultat local SUPER-Expert](https://aipoch.com/blog/aipoch-open-science-astabench-super-expert-local-result).
 
 [CORE-Bench-Hard · Rapport de reproductibilité](https://aipoch.com/blog/aipoch-open-science-core-bench-hard)
 

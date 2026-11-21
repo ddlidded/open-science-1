@@ -51,18 +51,18 @@
   <a href="./docs/es/README.md"><img alt="Español README" src="https://img.shields.io/badge/Español-d9d9d9"></a>
 </p>
 
-### 💡 AIPOCH Open-Science v1.3.1 updates
+### 💡 AIPOCH Open-Science v1.3.2 updates
 
 _November 19, 2026_
 
-- **Web search & page reading**: The built-in agent can search the web and read public pages; search approvals show the query in a readable card, and cited sources stay with the conversation.
-- **Citation graph**: Explore a paper's references and citing papers as an interactive graph — re-center on any related paper and filter by direction.
-- **MCP without opening the app**: Connecting an external agent through MCP starts the Open-Science service for you, with setup options for more than 30 agents and clients.
-- **Lab models & organization cases**: Sign in with a Lab account to use your organization's models and to search, import, or share research cases with teammates.
-- **Fresh model lists & clearer errors**: Refresh a provider's model list from Settings, and see the cause and next step when a provider request fails.
-- **Updating from 1.3.0**: If the 1.3.0 updater reports that another process is using the installation, fully quit Open-Science and install the downloaded package manually.
+- **Lighter long conversations**: Streamed replies stop accumulating hidden entries, and conversation bodies you are not viewing are reclaimed once they are safely saved — large sessions stay responsive without losing your place.
+- **Kilo Gateway**: Add Kilo as an official provider with or without an API key — an anonymous catalog refresh shows the free models your connection is eligible for, and onboarding can skip the provider step to decide later.
+- **Image model catalogs**: Refresh the bundled model list for official OpenAI, MiniMax, Bailian, and Volcengine Ark image services before you save, keeping your active model when it is still available.
+- **Reliable first agent messages**: Fresh default Agent, Claude Code, and Codex conversations no longer fail before their first model request, and the built-in Agent starts scheduled sessions with their intended prompt.
+- **PDF translation keeps the layout**: Wrapped titles, captions, definitions, and mathematical statements are recovered in reading order, and formulas, links, and graphics stay in their original places.
+- **Clearer download failures**: The home screen names the specific reason a use-case download failed — a missing manifest, unavailable package, timeout, network, server, verification, disk-full, or storage problem.
 
-[View the full v1.3.1 release notes](https://github.com/aipoch/open-science/releases/tag/v1.3.1)
+[View the full v1.3.2 release notes](https://github.com/aipoch/open-science/releases/tag/v1.3.2)
 
 <a id="share-your-research"></a>
 
@@ -87,6 +87,14 @@ Open the [official download page](https://aipoch.com/open-science/download) and 
 | Linux ARM64                             | The Linux ARM64 AppImage or Debian package |
 
 See [download verification](SECURITY.md#verifying-your-download) for checks before installation.
+
+On Windows 10/11 x64, you can install the desktop app from the [Microsoft Store](https://apps.microsoft.com/detail/XP99DM5G64X10X) or use WinGet in PowerShell.
+
+```powershell
+winget install --id AIPOCH.Open-Science --exact --source winget
+```
+
+Available versions may differ by channel. See the [installation and updates guide](https://aipoch.com/docs/guides/installation/) for details.
 
 On macOS, you can also install with [Homebrew](https://brew.sh):
 
@@ -233,6 +241,7 @@ AIPOCH evaluated Open-Science on research tasks ranging from literature search t
 | Answer a question from the literature | LitQA2-FullText, Test                     | **70/75** correct answers (93.33% accuracy).                                            |
 | Write a cited answer                  | ScholarQA-CS2, 100 validation questions   | **0.9289/1** composite quality score. Official test references use different questions. |
 | Carry out a workflow                  | ASI-Bench, local runs with the same model | **59.46** on B4 (Codex 55.45) and **56.11** on B2 (Codex 56.09).                        |
+| Reproduce ML/NLP experiments          | AstaBench SUPER-Expert test, 45 tasks     | **46.30%** output_match/mean in a local run with DeepSeek Flash/Max.                    |
 | Execute scientific workflows          | TB-Science 0.1 (70 tasks)                 | **69.05%** (145/210 local runs; GPT-6 Astra/max); no official rank or public run logs.  |
 | Reproduce published results           | CORE-Bench-Hard                           | **36/37** tasks correct (97.30%, including retests).                                    |
 | Analyze biomedical data               | BiomniBench-DA, Public 50                 | **79.05** mean judge score (81.04 and 77.06, weighted equally).                         |
@@ -243,7 +252,7 @@ AIPOCH evaluated Open-Science on research tasks ranging from literature search t
 
 These local runs used different metrics, models, and task sets from August to November 2026. The scores describe those runs. They were not rerun for this release.
 
-[Evaluation overview](https://aipoch.com/benchmark/open-science) · [CORE-Bench-Hard report](https://aipoch.com/blog/aipoch-open-science-core-bench-hard) · [BiomniBench-DA report](https://aipoch.com/blog/open-science-biomnibench-da) · [TB-Science 0.1 local result](https://aipoch.com/blog/aipoch-open-science-terminal-bench-science-local-result)
+[Evaluation overview](https://aipoch.com/benchmark/open-science) · [CORE-Bench-Hard report](https://aipoch.com/blog/aipoch-open-science-core-bench-hard) · [BiomniBench-DA report](https://aipoch.com/blog/open-science-biomnibench-da) · [TB-Science 0.1 local result](https://aipoch.com/blog/aipoch-open-science-terminal-bench-science-local-result) · [SUPER-Expert local result](https://aipoch.com/blog/aipoch-open-science-astabench-super-expert-local-result)
 
 </details>
 

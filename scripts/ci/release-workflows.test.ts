@@ -62,7 +62,9 @@ describe('release and scheduled workflow topology', () => {
       ['Smoke test Linux packages', 'linux']
     ]) {
       const gate = step(smoke, name)
-      expect(gate.if).toBe(`\${{ !inputs.install_only && matrix.platform == '${platform}' }}`)
+      expect(gate.if).toBe(
+        `\${{ !inputs.install_only && !inputs.conversation_only && matrix.platform == '${platform}' }}`
+      )
       expect(gate['continue-on-error']).not.toBe(true)
       expect(gate.run).toContain(
         'node scripts/ci/verify-update-occupancy.mjs packaged test-results/update-occupancy/e2e.json'
@@ -79,6 +81,31 @@ describe('release and scheduled workflow topology', () => {
     expect(evidence.if).not.toContain('always()')
     expect(workflow('release.yml').jobs.publish.needs).toContain('package-smoke')
     expect(workflow('nightly.yml').jobs.prepare.needs).toContain('package-smoke')
+  })
+
+  it('requires executed default Agent journeys before certifying every native package', () => {
+    const smoke = workflow('package-smoke.yml').jobs.smoke
+    const gate = step(smoke, 'Certify default Agent conversations')
+    const evidence = step(smoke, 'Record platform certification evidence')
+    expect(gate.if).toBe('${{ !inputs.install_only }}')
+    expect(gate['continue-on-error']).not.toBe(true)
+    expect(gate.run).toContain('node scripts/ci/run-default-agent-conversation.mjs')
+    expect(smoke.steps!.indexOf(gate)).toBeLessThan(smoke.steps!.indexOf(evidence))
+    expect(evidence.run).toContain(
+      '--default-agent-conversation test-results/default-agent-conversation/certification.json'
+    )
+    expect(evidence.if).toContain('!inputs.artifact_run_id')
+    expect(workflow('release.yml').jobs.publish.needs).toContain('package-smoke')
+    expect(workflow('nightly.yml').jobs.prepare.needs).toContain('package-smoke')
+    for (const name of ['verify', 'publish']) {
+      const job = workflow('nightly-publish.yml').jobs[name]
+      const validation = step(job, 'Require default Agent conversation certification')
+      expect(validation.if).toBeUndefined()
+      expect(validation.run).toContain('published artifacts/RELEASE-CERTIFICATION.json')
+      expect(job.steps!.indexOf(validation)).toBeLessThan(
+        job.steps!.indexOf(step(job, 'Check existing nightly release'))
+      )
+    }
   })
 
   it('validates a source-only baseline before installing and restores the candidate before packaging', () => {
@@ -460,7 +487,8 @@ describe('release and scheduled workflow topology', () => {
       'package-smoke',
       'notarize-mac',
       'cli-artifacts',
-      'linux-cli-packages'
+      'linux-cli-packages',
+      'windows-upgrade'
     ])
     expect(release.jobs['cli-artifacts'].needs).toEqual(['build', 'package-smoke', 'notarize-mac'])
     expect(release.jobs['publish-npm']).toBeUndefined()
@@ -623,7 +651,17 @@ describe('release and scheduled workflow topology', () => {
     expect(step(publish, 'Verify prepared nightly metadata').run).toContain(
       'test -s artifacts/RELEASE-CERTIFICATION.json'
     )
-    expect(publish.steps?.some(({ uses }) => uses?.startsWith('actions/checkout@'))).toBe(false)
+    expect(
+      publish.steps
+        ?.filter(({ uses }) => uses?.startsWith('actions/checkout@'))
+        .map(({ name }) => name)
+    ).toEqual(['Checkout trusted conversation gate'])
+    expect(step(publish, 'Checkout trusted conversation gate').with?.['sparse-checkout']).toBe(
+      'scripts/ci/default-agent-conversation.mjs'
+    )
+    expect(step(publish, 'Checkout trusted conversation gate').with?.ref).toContain(
+      "'refs/heads/main'"
+    )
     expect(
       publish.steps?.some(({ run }) => run?.includes('release-certification-evidence.mjs'))
     ).toBe(false)
@@ -687,10 +725,12 @@ describe('release and scheduled workflow topology', () => {
     expect(publish.if).toBe(
       "needs.plan.outputs.should_publish == 'true' && (github.event_name == 'workflow_run' ||\n (github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && !inputs.dry_run))"
     )
-    expect(verify.steps).toEqual(publish.steps!.slice(0, 3))
-    expect(verify.steps).toHaveLength(3)
+    expect(verify.steps).toEqual(publish.steps!.slice(0, 5))
+    expect(verify.steps).toHaveLength(5)
     expect(verify.steps!.map(({ name }) => name)).toEqual([
       'Download prepared nightly artifacts',
+      'Checkout trusted conversation gate',
+      'Require default Agent conversation certification',
       'Verify prepared nightly metadata',
       'Check existing nightly release'
     ])
@@ -878,6 +918,13 @@ describe('release and scheduled workflow topology', () => {
 
     expect(dispatch.types).toEqual(['windows-upgrade-smoke'])
     expect(smokeWorkflow.on).toHaveProperty('workflow_dispatch')
+    expect(smokeWorkflow.on).toHaveProperty('schedule')
+    expect(smokeWorkflow.jobs.report.needs).toBe('candidate-upgrade')
+    expect(smokeWorkflow.jobs.report.if).toContain("github.event_name == 'schedule'")
+    expect(workflow('release.yml').jobs['windows-upgrade']).toMatchObject({
+      uses: './.github/workflows/daily-windows-upgrade.yml',
+      with: { signed_run_id: "${{ format('{0}', github.run_id) }}" }
+    })
     expect(smokeWorkflow.concurrency?.['cancel-in-progress']).toBe(false)
     expect(smoke['continue-on-error']).toBeUndefined()
     const checkout = step(smoke, 'Checkout smoke harness')
@@ -956,6 +1003,7 @@ if ($artifactSaveBase -eq $artifactSaveCommit) {
       'runtime-resource-soak.yml',
       'source-regression.yml',
       'windows-full-test.yml',
+      'daily-windows-upgrade.yml',
       'windows-upgrade-smoke.yml'
     ]) {
       for (const job of Object.values(workflow(name).jobs)) {
@@ -1305,6 +1353,7 @@ describe('build verification throughput', () => {
       uses: './.github/workflows/package-smoke.yml',
       with: {
         artifact_run_id: '${{ inputs.package_smoke_run_id }}',
+        conversation_only: '${{ inputs.conversation_only }}',
         require_windows_signing: false
       }
     })

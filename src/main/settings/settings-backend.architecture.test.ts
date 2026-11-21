@@ -335,6 +335,7 @@ describe('Settings backend ownership architecture', () => {
     expect(publicOperationsOf(settingsPaths.repository, 'SettingsRepository')).toEqual([
       'addComputeGrant',
       'addCustomServer',
+      'addOnboardingKiloProvider',
       'clearCodeBuddyInfo',
       'clearCodexInfo',
       'clearCodexIsolatedValidationIfExists',
@@ -346,6 +347,7 @@ describe('Settings backend ownership architecture', () => {
       'deleteProvider',
       'getSettings',
       'hasComputeGrant',
+      'initializeDesktopKiloDefaults',
       'listComputeGrants',
       'markLegacyDataMovePromptDismissed',
       'markOnboardingComplete',
@@ -505,7 +507,7 @@ describe('Settings backend ownership architecture', () => {
   it('locks the SettingsService application interface', () => {
     expect(publicOperationsOf(settingsPaths.service, 'SettingsService')).toEqual(
       `
-        addCustomServer addManualInterpreter admitReviewerExecutionModel admitSessionDetailsExecutionTarget admitSubagentExecutionModel admitVisionModel allowNotebookNetworkDestination allowNotebookNetworkDomain authenticateCustomServer authenticateDeviceCredential bootstrap buildCustomServerTemplateExport
+        addCustomServer addManualInterpreter addOnboardingKiloProvider admitReviewerExecutionModel admitSessionDetailsExecutionTarget admitSubagentExecutionModel admitVisionModel allowNotebookNetworkDestination allowNotebookNetworkDomain authenticateCustomServer authenticateDeviceCredential bootstrap buildCustomServerTemplateExport
         buildSkillExport beginLabLogin beginXaiOAuthLogin cancelClaudeIsolatedLogin cancelClaudeLogin cancelCodexLogin cancelLabLogin checkLab cancelCustomServerAuthentication cancelDeviceCredentialAuthentication cancelXaiOAuthLogin captureActiveAgentBackendSelection captureActiveExplicitAgentBackendTarget checkEnvironment classification clearGrantedLocalRoots codeBuddySkillCatalog codexSkillCatalog
         codexSkillDescriptorsForIds createDeviceCredential createSkill deleteProvider deleteSkill detectClaude detectCodeBuddy detectCodex
         detectDevin detectOpencode deviceCredentialConsumerIds deviceCredentialIdForServer disconnectCustomServer disconnectDeviceCredential dismissLegacyDataMovePrompt getActiveInstallId getAgentEnvironmentCreationEnabled getAppIconVariant getClosePreference
@@ -699,6 +701,7 @@ describe('Settings backend ownership architecture', () => {
       'huggingFaceRuntime',
       'imageModel',
       'imageServices',
+      'kiloDefaultInitialized',
       'legacyDataMovePromptDismissedAt',
       'localShellRuntime',
       'localePreference',
@@ -798,7 +801,10 @@ describe('Settings backend ownership architecture', () => {
     expect(nodeEntry).toContain(
       'const { settingsStore, repository } = await prepareApplicationLocations(configRoot)'
     )
-    expect(nodeEntry).toContain('const startupSettings = await repository.getSettings()')
+    expect(nodeEntry).toContain('const existingSettings = await settingsStore.readExisting()')
+    expect(nodeEntry).toContain(
+      'const startupSettings = existingSettings ?? (await repository.getSettings())'
+    )
     expect(nodeEntry).toMatch(/createCoreRuntime\(\{[\s\S]*?\bsettingsStore,/u)
     const desktopEntry = readSource(resolve(projectRoot, 'src/main/index.ts'))
     expect(desktopEntry).not.toMatch(

@@ -1274,7 +1274,10 @@ class SettingsService {
     return this.scenarioModels.vision.admit()
   }
 
-  get imageModels(): Pick<ScenarioModelOwner['image'], 'snapshot' | 'mutate' | 'resolve' | 'test'> {
+  get imageModels(): Pick<
+    ScenarioModelOwner['image'],
+    'snapshot' | 'mutate' | 'resolve' | 'test' | 'refreshCatalog'
+  > {
     return this.scenarioModels.image
   }
 
@@ -1882,6 +1885,10 @@ class SettingsService {
   async uninstallCodex(): Promise<UninstallResult> {
     const { activeBackendAffected } = await this.runtimeManager.uninstallCodex()
     return { snapshot: await this.getSettingsView(), activeBackendAffected }
+  }
+
+  async addOnboardingKiloProvider(): Promise<void> {
+    await this.repository.addOnboardingKiloProvider()
   }
 
   // Records that first-run onboarding finished so later launches skip the wizard.

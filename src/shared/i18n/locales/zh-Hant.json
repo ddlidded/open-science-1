@@ -44,7 +44,8 @@
     "Close window": "關閉視窗",
     "Review potentially destructive code": "檢查可能具有破壞性的程式碼",
     "Confirm Notebook kernel and environment": "確認 Notebook 核心與環境",
-    "Quitting will interrupt unfinished tasks. Your saved conversations and files will be kept.": "結束應用程式將中斷未完成的工作。已儲存的對話和檔案會保留。"
+    "Quitting will interrupt unfinished tasks. Your saved conversations and files will be kept.": "結束應用程式將中斷未完成的工作。已儲存的對話和檔案會保留。",
+    "Could not download this example. Try again.": "無法下載此案例，請重試。"
   },
   "native": {
     "Use {{name}} as a live illustration?": "將 {{name}} 用作動態示範？",
@@ -217,7 +218,17 @@
     "Could not connect to Lab. Check your network connection and Lab server address in Settings, then try again.": "無法連線至 Lab。請檢查網路連線與「設定」中的 Lab 伺服器位址後重試。",
     "Lab returned an unexpected response while uploading the organization case.": "上傳機構案例時，Lab 傳回非預期回應。",
     "The upload was cancelled because your Lab session changed. Sign in and try again.": "由於 Lab 工作階段已變更，上傳已取消。請重新登入並重試。",
-    "Could not upload the Session package to Lab. Check your connection and try again.": "無法將工作階段套件上傳至 Lab。請檢查網路連線並重試。"
+    "Could not upload the Session package to Lab. Check your connection and try again.": "無法將工作階段套件上傳至 Lab。請檢查網路連線並重試。",
+    "Not enough disk space to download this example ({{required}} needed, {{available}} available). Free up at least {{shortfall}}, then try again.": "磁碟空間不足，無法下載此案例（需要 {{required}}，目前可用 {{available}}）。請至少釋放 {{shortfall}} 空間後重試。",
+    "Could not load the example catalog. Check your connection and try again.": "無法載入案例目錄，請檢查網路連線後重試。",
+    "This example is currently unavailable. Refresh the list and try again.": "此案例目前無法使用，請重新整理清單後重試。",
+    "The example download timed out. Check your connection and try again.": "下載此案例逾時，請檢查網路連線後重試。",
+    "Network error while downloading this example. Check your connection or proxy, then try again.": "下載此案例時發生網路錯誤，請檢查網路連線或代理設定後重試。",
+    "The example server returned an error. Try again shortly.": "案例伺服器傳回錯誤，請稍後重試。",
+    "The downloaded example failed verification. Try again shortly.": "下載的案例檔案驗證未通過，請稍後重試。",
+    "Not enough disk space to download this example. Free up space and try again.": "磁碟空間不足，無法下載此案例。請釋放空間後重試。",
+    "Could not save the downloaded example to temporary storage. Check folder permissions and try again.": "無法將下載的案例儲存至暫存目錄，請檢查資料夾權限後重試。",
+    "Wait for the application handoff to finish before transferring research.": "請等待應用程式交接完成後再傳輸研究內容。"
   },
   "renderer": {
     "{{resolution}} (allow {{min}}–{{max}} min)": "{{resolution}}（預留 {{min}}–{{max}} 分鐘）",
@@ -849,6 +860,7 @@
     "Paste API key": "貼上 API 金鑰",
     "Show API key": "顯示 API 金鑰",
     "API key is required.": "必須填寫 API 金鑰。",
+    "Free models work without an API key.": "免費模型不需要 API 金鑰。",
     "API key — models provided": "API 金鑰 —— 已內建模型清單",
     "About": "關於",
     "Manual install or update": "手動安裝或更新",
@@ -7343,7 +7355,7 @@
     "Permission to read this file was denied. Check its access permissions and retry.": "讀取此檔案的權限遭拒。請檢查存取權限後重試。",
     "The browser could not display this image. It may be damaged, unsupported, or exceed available memory. Download the original to view it.": "瀏覽器無法顯示此圖片。圖片可能已損壞、格式不受支援，或超出可用記憶體。請下載原始檔案查看。",
     "Could not mark messages as read.": "無法將訊息標記為已讀。",
-    "Connect and test a model to finish setup. The agent needs this connection to respond to your requests.": "連線並測試模型以完成設定。智能體需要此連線來回應你的請求。",
+    "Skip to access free Kilo models.": "跳過後可選用 Kilo 免費模型。",
     "Download cancelled. Completed files were kept; remaining files stay selected.": "下載已取消。已完成的檔案予以保留，其餘檔案保持選取。",
     "Download cancelled. No archive was replaced.": "下載已取消。未取代任何壓縮檔。",
     "Cancelling download…": "正在取消下載…",
@@ -7624,7 +7636,6 @@
     "Verifying download…": "正在驗證下載檔案…",
     "Example download progress": "案例下載進度",
     "Could not cancel download. Try again.": "無法取消下載，請重試。",
-    "Could not download this example. Try again.": "無法下載此案例，請重試。",
     "Different Zotero collections would merge under the same name. Rename them in Zotero, then preview again.": "不同的 Zotero 集合會因名稱相同而合併。請在 Zotero 中重新命名後再次預覽。",
     "Edit import metadata": "編輯匯入中繼資料",
     "Edits apply to this import only. Zotero will not be changed.": "編輯僅套用於本次匯入，不會修改 Zotero。",
@@ -8108,7 +8119,6 @@
     "Recheck and retry": "重新檢查並重試",
     "Manage Notebook resources": "管理 Notebook 資源",
     "Memory has recovered. Execution still requires your choice.": "記憶體已恢復。執行仍需您明確選擇。",
-    "Notebook resources are active. Manage them in Compute if they are no longer needed.": "Notebook 資源仍在執行。不再需要時可在 Compute 中管理。",
     "The latest memory status could not be read. Retry will check it again.": "無法讀取最新記憶體狀態。重試時會再次檢查。",
     "Memory check details": "記憶體檢查詳情",
     "The memory checking component is unavailable. Update or repair the installation before retrying.": "記憶體檢查元件無法使用。請先更新或修復安裝，再選擇重試。",
@@ -8299,6 +8309,7 @@
     "The vendor returned an invalid or empty model catalog.": "服務商傳回無效或空的模型目錄。",
     "Workspace ID": "工作區 ID",
     "Last updated: {{time}}": "上次更新：{{time}}",
+    "Current default omitted from the catalog": "目錄未傳回目前的預設模型",
     "Save to apply the refreshed model list.": "儲存後套用重新整理的模型列表。",
     "Model list saved. The latest settings could not be loaded.": "模型清單已儲存，無法載入最新設定。",
     "Model refresh failed. The previous list is kept.": "模型重新整理失敗，已保留上次列表。",
@@ -8791,6 +8802,21 @@
     "{{completed}} of {{total}} files": "{{total}} 個檔案中已上傳 {{completed}} 個",
     "Upload finished with errors": "上傳完成，但發生錯誤",
     "Upload complete": "上傳完成",
-    "Uploading…": "上傳中…"
+    "Uploading…": "上傳中…",
+    "Another package operation is already in progress. Wait for it to finish, then try again.": "已有其他封裝操作正在進行中，請等待完成後重試。",
+    "Generating image…": "正在產生圖片…",
+    "New image ready": "新圖片已產生",
+    "View image": "檢視圖片",
+    "Revise last edit": "調整上次編輯",
+    "Continue editing": "繼續編輯",
+    "Generate new version": "產生新版本",
+    "Expand instructions": "展開指令",
+    "Collapse instructions": "收合指令",
+    "Hide instructions": "隱藏指令",
+    "View source image": "檢視原圖",
+    "Add instruction": "新增指令",
+    "Click to edit image. Alt-click to add a note.": "點擊編輯圖片，按住 Alt／Option 點擊新增批註。",
+    "Click to edit": "點擊編輯",
+    "Generate another version to compare.": "產生另一個版本後即可比較。"
   }
 }

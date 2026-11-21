@@ -467,8 +467,12 @@ const publicApplicationCommandError = (
 const applicationCommandErrorStatus = (error: ApplicationCommandError): number => {
   if (error.code === 'invalid-command-arguments' || error.code.startsWith('csl-')) return 400
   if (error.code === 'command-unavailable') return 404
-  if (error.code === 'session-details-conflict') return 409
-  if (error.code === 'session-revision-conflict') return 409
+  if (
+    error.code === 'session-details-conflict' ||
+    error.code === 'session-revision-conflict' ||
+    error.code === 'session-package-busy'
+  )
+    return 409
   return 500
 }
 
@@ -2076,19 +2080,12 @@ const startWebHttpServer = async (options: WebServerOptions): Promise<RunningWeb
 
   const removeBroadcastSink = options.applicationEvents.subscribe((event) => {
     const projection = projectWebRendererEvent(event)
-    const internalProjection = projection
-      ? { ...projection, payload: projectSessionEventPayload(projection) }
-      : undefined
-    const needsPayloadClient = internalProjection?.payload !== projection?.payload
     const publicMessages = projectPublicTaskEvents(event, (sessionId, promptMessageId) =>
       options.tasks?.resolveActiveRun?.(sessionId, promptMessageId)
     ).map((projection) => publicTaskEventStream.publish(projection))
-    const legacyInternalMessage = internalProjection
-      ? JSON.stringify(internalProjection)
-      : undefined
-    const replayInternalMessage = internalProjection
-      ? internalEventStream.publish(internalProjection)
-      : undefined
+    const replayInternalMessage = projection ? internalEventStream.publish(projection) : undefined
+    // Legacy sockets cannot hydrate invalidations. Encode their live-only message on demand.
+    let legacyInternalMessage: string | null | undefined
     for (const socket of sockets) {
       if (publicEventSockets.has(socket)) {
         for (const publicMessage of publicMessages) {
@@ -2096,8 +2093,14 @@ const startWebHttpServer = async (options: WebServerOptions): Promise<RunningWeb
         }
       } else if (internalEventSockets.get(socket) === 'replay') {
         if (replayInternalMessage) sendCurrentWebSocketMessage(socket, replayInternalMessage)
-      } else if (legacyInternalMessage) {
-        if (needsPayloadClient) {
+      } else if (projection) {
+        if (legacyInternalMessage === undefined) {
+          legacyInternalMessage =
+            projectSessionEventPayload(projection) === projection.payload
+              ? JSON.stringify(projection)
+              : null
+        }
+        if (legacyInternalMessage === null) {
           socket.close(1002, 'Reload to receive large Session updates')
           continue
         }

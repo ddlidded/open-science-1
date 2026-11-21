@@ -623,7 +623,14 @@ class NotebookRuntimeService {
     if (this.memoryPolicyActive === active || this.memoryPolicyDisposed) return
     this.memoryPolicyActive = active
     void this.getMemoryPolicy()
-      .then((policy) => policy.setActive?.(this.memoryPolicyActive && !this.memoryPolicyDisposed))
+      .then((policy) => {
+        if (this.memoryPolicyDisposed) return
+        policy.setActive?.(this.memoryPolicyActive)
+        // Stopping polling must also clear resource-dependent notices. Do not
+        // misrepresent resource release as recovery of system memory pressure.
+        if (!this.memoryPolicyActive)
+          this.options.callbacks?.onMemoryPolicyChanged?.(policy.currentState(), false)
+      })
       .catch((error) =>
         this.runtimeLogger.error(
           'Notebook memory policy could not observe resources',
@@ -3266,6 +3273,13 @@ class NotebookRuntimeService {
   // too, not just materialize/install).
   recoveryStatus(): import('@aipoch/environment/contracts').NotebookRecoveryStatus {
     return this.recoveryCoordinator.status()
+  }
+
+  async ensureEnvironmentStatusReady(): Promise<void> {
+    // Startup already reconciles kernel receipts. Reading status only needs its outcome and the
+    // current environment journal, even if an identifiable kernel still fences a future write.
+    if (this.runLifecycleRecovery) await this.recoverInterruptedOperations()
+    await this.recoveryCoordinator.ensureReady()
   }
 
   async ensureRecovered(laneKey?: string): Promise<void> {

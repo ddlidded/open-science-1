@@ -44,7 +44,8 @@
     "Close window": "Cerrar ventana",
     "Review potentially destructive code": "Revisar código potencialmente destructivo",
     "Confirm Notebook kernel and environment": "Confirmar el kernel y el entorno de Notebook",
-    "Quitting will interrupt unfinished tasks. Your saved conversations and files will be kept.": "Al salir, se interrumpirán las tareas pendientes. Se conservarán las conversaciones y los archivos guardados."
+    "Quitting will interrupt unfinished tasks. Your saved conversations and files will be kept.": "Al salir, se interrumpirán las tareas pendientes. Se conservarán las conversaciones y los archivos guardados.",
+    "Could not download this example. Try again.": "No se pudo descargar este ejemplo. Inténtelo de nuevo."
   },
   "native": {
     "Use {{name}} as a live illustration?": "¿Usar {{name}} como ilustración animada?",
@@ -219,7 +220,17 @@
     "Could not connect to Lab. Check your network connection and Lab server address in Settings, then try again.": "No se pudo conectar con Lab. Verifique su conexión de red y la dirección del servidor de Lab en Configuración, e inténtelo de nuevo.",
     "Lab returned an unexpected response while uploading the organization case.": "Lab devolvió una respuesta inesperada al subir el caso de la organización.",
     "The upload was cancelled because your Lab session changed. Sign in and try again.": "La subida se canceló porque su sesión de Lab cambió. Inicie sesión e inténtelo de nuevo.",
-    "Could not upload the Session package to Lab. Check your connection and try again.": "No se pudo subir el paquete de sesión a Lab. Verifique su conexión e inténtelo de nuevo."
+    "Could not upload the Session package to Lab. Check your connection and try again.": "No se pudo subir el paquete de sesión a Lab. Verifique su conexión e inténtelo de nuevo.",
+    "Not enough disk space to download this example ({{required}} needed, {{available}} available). Free up at least {{shortfall}}, then try again.": "No hay suficiente espacio en disco para descargar este ejemplo (se necesitan {{required}}, hay {{available}} disponibles). Libere al menos {{shortfall}} e inténtelo de nuevo.",
+    "Could not load the example catalog. Check your connection and try again.": "No se pudo cargar el catálogo de ejemplos. Compruebe su conexión e inténtelo de nuevo.",
+    "This example is currently unavailable. Refresh the list and try again.": "Este ejemplo no está disponible actualmente. Actualice la lista e inténtelo de nuevo.",
+    "The example download timed out. Check your connection and try again.": "Se agotó el tiempo de espera al descargar el ejemplo. Compruebe su conexión e inténtelo de nuevo.",
+    "Network error while downloading this example. Check your connection or proxy, then try again.": "Error de red al descargar este ejemplo. Compruebe su conexión o proxy e inténtelo de nuevo.",
+    "The example server returned an error. Try again shortly.": "El servidor de ejemplos devolvió un error. Inténtelo de nuevo en unos momentos.",
+    "The downloaded example failed verification. Try again shortly.": "El ejemplo descargado no superó la verificación. Inténtelo de nuevo en unos momentos.",
+    "Not enough disk space to download this example. Free up space and try again.": "No hay suficiente espacio en disco para descargar este ejemplo. Libere espacio e inténtelo de nuevo.",
+    "Could not save the downloaded example to temporary storage. Check folder permissions and try again.": "No se pudo guardar el ejemplo descargado en el almacenamiento temporal. Compruebe los permisos de la carpeta e inténtelo de nuevo.",
+    "Wait for the application handoff to finish before transferring research.": "Espere a que finalice la transferencia de la aplicación antes de transferir datos de investigación."
   },
   "renderer": {
     "{{resolution}} (allow {{min}}–{{max}} min)": "{{resolution}} (prever {{min}}–{{max}} min)",
@@ -754,6 +765,7 @@
     "Paste API key": "Pegar clave API",
     "Show API key": "Mostrar clave API",
     "API key is required.": "La clave API es obligatoria.",
+    "Free models work without an API key.": "Los modelos gratuitos se pueden usar sin una clave de API.",
     "API key — models provided": "Clave API: modelos proporcionados",
     "About": "Acerca de",
     "Manual install or update": "Instalar o actualizar manualmente",
@@ -7669,7 +7681,7 @@
     "Permission to read this file was denied. Check its access permissions and retry.": "Se ha denegado el permiso para leer este archivo. Compruebe los permisos de acceso y vuelva a intentarlo.",
     "The browser could not display this image. It may be damaged, unsupported, or exceed available memory. Download the original to view it.": "El navegador no ha podido mostrar esta imagen. Puede estar dañada, no ser compatible o superar la memoria disponible. Descargue el original para verla.",
     "Could not mark messages as read.": "No se pudieron marcar los mensajes como leídos.",
-    "Connect and test a model to finish setup. The agent needs this connection to respond to your requests.": "Conecte y pruebe un modelo para finalizar la configuración. El agente necesita esta conexión para responder a sus solicitudes.",
+    "Skip to access free Kilo models.": "Omita este paso para acceder a modelos gratuitos de Kilo.",
     "Download cancelled. Completed files were kept; remaining files stay selected.": "Descarga cancelada. Se conservaron los archivos completados; los restantes siguen seleccionados.",
     "Download cancelled. No archive was replaced.": "Descarga cancelada. No se reemplazó ningún archivo comprimido.",
     "Cancelling download…": "Cancelando descarga…",
@@ -7956,7 +7968,6 @@
     "Verifying download…": "Verificando la descarga…",
     "Example download progress": "Progreso de descarga del ejemplo",
     "Could not cancel download. Try again.": "No se pudo cancelar la descarga. Inténtelo de nuevo.",
-    "Could not download this example. Try again.": "No se pudo descargar este ejemplo. Inténtelo de nuevo.",
     "Different Zotero collections would merge under the same name. Rename them in Zotero, then preview again.": "Se combinarían distintas colecciones de Zotero con el mismo nombre. Cámbieles el nombre en Zotero y vuelva a generar la vista previa.",
     "Edit import metadata": "Editar los metadatos de importación",
     "Edits apply to this import only. Zotero will not be changed.": "Los cambios solo se aplican a esta importación. Zotero no se modificará.",
@@ -8452,7 +8463,6 @@
     "Recheck and retry": "Volver a comprobar y reintentar",
     "Manage Notebook resources": "Gestionar recursos de Notebook",
     "Memory has recovered. Execution still requires your choice.": "La memoria se ha recuperado. La ejecución sigue requiriendo su decisión.",
-    "Notebook resources are active. Manage them in Compute if they are no longer needed.": "Hay recursos de Notebook activos. Gestiónelos en Compute si ya no los necesita.",
     "The latest memory status could not be read. Retry will check it again.": "No se pudo leer el estado actual de la memoria. Al reintentar se comprobará de nuevo.",
     "Memory check details": "Detalles de la comprobación de memoria",
     "The memory checking component is unavailable. Update or repair the installation before retrying.": "El componente de comprobación de memoria no está disponible. Actualice o repare la instalación antes de reintentar.",
@@ -8645,6 +8655,7 @@
     "The vendor returned an invalid or empty model catalog.": "El proveedor ha devuelto un catálogo de modelos no válido o vacío.",
     "Workspace ID": "ID del espacio de trabajo",
     "Last updated: {{time}}": "Última actualización: {{time}}",
+    "Current default omitted from the catalog": "El modelo predeterminado actual no figura en el catálogo",
     "Save to apply the refreshed model list.": "Guarde los cambios para aplicar la lista de modelos actualizada.",
     "Model list saved. The latest settings could not be loaded.": "Lista de modelos guardada. No se pudo cargar la configuración más reciente.",
     "Model refresh failed. The previous list is kept.": "No se ha podido actualizar la lista de modelos. Se conserva la lista anterior.",
@@ -9151,6 +9162,21 @@
     "{{completed}} of {{total}} files": "{{completed}} de {{total}} archivos",
     "Upload finished with errors": "Carga finalizada con errores",
     "Upload complete": "Carga completada",
-    "Uploading…": "Cargando…"
+    "Uploading…": "Cargando…",
+    "Another package operation is already in progress. Wait for it to finish, then try again.": "Ya hay otra operación de paquete en curso. Espere a que finalice e inténtelo de nuevo.",
+    "Generating image…": "Generando imagen…",
+    "New image ready": "Nueva imagen lista",
+    "View image": "Ver imagen",
+    "Revise last edit": "Revisar la última edición",
+    "Continue editing": "Continuar editando",
+    "Generate new version": "Generar una nueva versión",
+    "Expand instructions": "Ampliar instrucciones",
+    "Collapse instructions": "Contraer instrucciones",
+    "Hide instructions": "Ocultar instrucciones",
+    "View source image": "Ver imagen original",
+    "Add instruction": "Añadir instrucción",
+    "Click to edit image. Alt-click to add a note.": "Hacer clic para editar la imagen. Alt + clic para añadir una nota.",
+    "Click to edit": "Hacer clic para editar",
+    "Generate another version to compare.": "Generar otra versión para comparar."
   }
 }
