@@ -11,6 +11,7 @@ import { AcpContextCompactionWorkflow } from './context-compaction-workflow'
 import { AcpPromptPreparationOwner } from './prompt-preparation-owner'
 import {
   AcpPromptTurnWorkflow,
+  type AcpPromptTurnMode,
   type AcpPromptTurnPlanWorkflow,
   type AcpPromptTurnWorkflowOptions
 } from './prompt-turn-workflow'
@@ -71,6 +72,103 @@ const safeLogError = (message: string, error: unknown): void => {
     log.error(message, errorLogFields(error))
   } catch {
     // Prompt projection and the original provider outcome take precedence over diagnostics.
+  }
+}
+
+type NotebookTurnIntentDeps = Readonly<{
+  notebook?: AcpRuntimeOptions['notebook']
+  projectId: (sessionId: string) => string
+  boundIntentFor: (sessionId: string) => NotebookExecutionIntent | undefined
+  // True when the live provider connection can accept a rebound Notebook MCP environment
+  // (session/resume). False means the authority bound at provision governs the whole Session.
+  authorityRebindable: () => boolean
+}>
+
+// Resolves and marks the Notebook execution authority for one prompt turn. When the provider
+// cannot rebind its session MCP configuration (e.g. Devin, which has no session/resume), the
+// authority bound at provision stays in effect and no per-turn intent is minted or marked.
+const prepareNotebookTurnIntent = (
+  request: AcpPromptRequest,
+  mode: AcpPromptTurnMode,
+  deps: NotebookTurnIntentDeps
+): void => {
+  const { notebook } = deps
+  if (!notebook) return
+  const scope = {
+    projectId: deps.projectId(request.sessionId),
+    sessionId: request.sessionId,
+    messageBranchId: request.provenanceContext?.messageBranchId,
+    promptMessageId: request.provenanceContext?.promptMessageId
+  }
+  const current = notebook.currentExecutionIntent
+    ? notebook.currentExecutionIntent(scope)
+    : deps.boundIntentFor(request.sessionId)
+  // Lightweight runtime adapters without a Notebook authority port keep their existing
+  // presentation-only contract. Production root and child capabilities always carry one.
+  if (!notebook.createExecutionIntent && !current && !notebookExecutionIntent(request)) return
+  const operation = notebookUserOperation(request)
+  let intent = notebookExecutionIntent(request)
+  const humanTurn =
+    mode.kind === 'user' &&
+    mode.runtimeReviewOwner !== 'task' &&
+    !request.continuation &&
+    !request.suppressUserMessage
+  if (humanTurn && operation && notebook.createExecutionIntent) {
+    operation.assertCurrent()
+    if (operation.projectId && operation.projectId !== scope.projectId)
+      throw new Error('Notebook continuation does not belong to this Project.')
+    if (
+      operation.refusalId &&
+      (current?.refusalId !== operation.refusalId ||
+        current.scope.messageBranchId !== scope.messageBranchId)
+    )
+      throw new Error('The Notebook refusal changed. Refresh it before continuing execution.')
+    // Ordinary chat may explain a refusal; only the purpose-owned human command creates
+    // another executable context after rejection.
+    if (!deps.authorityRebindable()) {
+      // The provider cannot rebind its session MCP configuration, so a fresh per-turn
+      // authority could never reach the Notebook environment. Keep the authority bound
+      // at provision; when it was refused, leave the turn unmarked so dispatch proceeds
+      // and the Notebook tool itself reports the refusal.
+      if (current && !current.refusalId) intent = current
+    } else if (current?.refusalId && !operation.refusalId) intent = current
+    else {
+      intent = notebook.createExecutionIntent(scope)
+      intent.prepareUserExecution(operation.refusalId ? operation.assertCurrent : undefined)
+    }
+  } else if (!intent) {
+    const origin =
+      request.provenanceContext?.originMessageId ?? request.provenanceContext?.promptMessageId
+    intent = origin ? notebook.resolveExecutionIntent?.(scope, origin) : undefined
+    if (
+      !intent &&
+      mode.kind === 'application' &&
+      mode.attribution.feature === 'schedule' &&
+      !request.provenanceContext?.originMessageId &&
+      request.provenanceContext?.promptMessageId
+    ) {
+      // A trusted scheduled wake keeps the Session's existing execution context, including
+      // refusals. Its first context remains pending until the ordinary prompt preparation.
+      intent =
+        !deps.authorityRebindable() && current && !current.refusalId
+          ? current
+          : current?.forDescendant(request.provenanceContext)
+      if (!intent && notebook.createExecutionIntent) {
+        intent = notebook.createExecutionIntent(scope)
+        intent.prepareUserExecution()
+      }
+    }
+  }
+  if (!intent && deps.authorityRebindable()) {
+    // Synthesizing a refused authority only makes sense when it can be installed on the
+    // provider; on a fixed-configuration session the bound intent governs tool calls.
+    intent = new NotebookExecutionIntent(scope)
+    intent.block('originating-execution-context-unavailable')
+  }
+  if (intent) {
+    markNotebookExecutionIntent(request, intent)
+    const promptId = request.provenanceContext?.promptMessageId
+    if (promptId) notebook.rememberExecutionIntent?.(scope, promptId, intent)
   }
 }
 
@@ -239,9 +337,16 @@ const composeAcpRuntimePromptOwners = (
   }): Promise<void> => {
     session.sessionUpdateProjector.clearAssistantOutput(input.appSessionId)
     const intent = input.request && notebookExecutionIntent(input.request)
+    if (intent && !base.connectionResources.capabilities.resume) {
+      // Without session/resume the provider keeps the Notebook authority bound at provision —
+      // the refreshed environment can never be installed, so the bound intent remains the
+      // executable context for the Session's lifetime. A refused turn intent must still fail
+      // closed here rather than silently dispatching under the stale authority.
+      intent.assertExecutable()
+    }
     // A distinct Provider dispatch has its own credential even when it inherits the same stopped
     // intent. A late callback from its predecessor must never stop a newer explanatory branch.
-    if (intent) {
+    else if (intent) {
       let refresh:
         | Awaited<ReturnType<typeof base.sessionCapabilities.prepareNotebookConnectionRefresh>>
         | undefined
@@ -439,73 +544,14 @@ const composeAcpRuntimePromptOwners = (
           text
         }),
       beforePromptDispatch: beforeFrameworkPromptDispatch,
-      prepareNotebookIntent: (request, mode) => {
-        const notebook = options.notebook
-        if (!notebook) return
-        const scope = {
-          projectId: projectId(request.sessionId),
-          sessionId: request.sessionId,
-          messageBranchId: request.provenanceContext?.messageBranchId,
-          promptMessageId: request.provenanceContext?.promptMessageId
-        }
-        const current = notebook.currentExecutionIntent
-          ? notebook.currentExecutionIntent(scope)
-          : base.sessionCapabilities.notebookExecutionIntentFor(request.sessionId)
-        // Lightweight runtime adapters without a Notebook authority port keep their existing
-        // presentation-only contract. Production root and child capabilities always carry one.
-        if (!notebook.createExecutionIntent && !current && !notebookExecutionIntent(request)) return
-        const operation = notebookUserOperation(request)
-        let intent = notebookExecutionIntent(request)
-        const humanTurn =
-          mode.kind === 'user' &&
-          mode.runtimeReviewOwner !== 'task' &&
-          !request.continuation &&
-          !request.suppressUserMessage
-        if (humanTurn && operation && notebook.createExecutionIntent) {
-          operation.assertCurrent()
-          if (operation.projectId && operation.projectId !== scope.projectId)
-            throw new Error('Notebook continuation does not belong to this Project.')
-          if (
-            operation.refusalId &&
-            (current?.refusalId !== operation.refusalId ||
-              current.scope.messageBranchId !== scope.messageBranchId)
-          )
-            throw new Error('The Notebook refusal changed. Refresh it before continuing execution.')
-          // Ordinary chat may explain a refusal; only the purpose-owned human command creates
-          // another executable context after rejection.
-          if (current?.refusalId && !operation.refusalId) intent = current
-          else {
-            intent = notebook.createExecutionIntent(scope)
-            intent.prepareUserExecution(operation.refusalId ? operation.assertCurrent : undefined)
-          }
-        } else if (!intent) {
-          const origin =
-            request.provenanceContext?.originMessageId ?? request.provenanceContext?.promptMessageId
-          intent = origin ? notebook.resolveExecutionIntent?.(scope, origin) : undefined
-          if (
-            !intent &&
-            mode.kind === 'application' &&
-            mode.attribution.feature === 'schedule' &&
-            !request.provenanceContext?.originMessageId &&
-            request.provenanceContext?.promptMessageId
-          ) {
-            // A trusted scheduled wake keeps the Session's existing execution context, including
-            // refusals. Its first context remains pending until the ordinary prompt preparation.
-            intent = current?.forDescendant(request.provenanceContext)
-            if (!intent && notebook.createExecutionIntent) {
-              intent = notebook.createExecutionIntent(scope)
-              intent.prepareUserExecution()
-            }
-          }
-        }
-        if (!intent) {
-          intent = new NotebookExecutionIntent(scope)
-          intent.block('originating-execution-context-unavailable')
-        }
-        markNotebookExecutionIntent(request, intent)
-        const promptId = request.provenanceContext?.promptMessageId
-        if (promptId) notebook.rememberExecutionIntent?.(scope, promptId, intent)
-      },
+      prepareNotebookIntent: (request, mode) =>
+        prepareNotebookTurnIntent(request, mode, {
+          notebook: options.notebook,
+          projectId,
+          boundIntentFor: (sessionId) =>
+            base.sessionCapabilities.notebookExecutionIntentFor(sessionId),
+          authorityRebindable: () => base.connectionResources.capabilities.resume
+        }),
       observeNotebookExecutionLoop: ({
         appSessionId,
         providerSessionId,
@@ -704,5 +750,5 @@ const composeAcpRuntimePromptOwners = (
 
 type AcpRuntimePromptOwners = ReturnType<typeof composeAcpRuntimePromptOwners>
 
-export { composeAcpRuntimePromptOwners }
-export type { AcpRuntimePromptHost, AcpRuntimePromptOwners }
+export { composeAcpRuntimePromptOwners, prepareNotebookTurnIntent }
+export type { AcpRuntimePromptHost, AcpRuntimePromptOwners, NotebookTurnIntentDeps }
