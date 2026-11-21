@@ -6,6 +6,7 @@ import type { GrantedLocalRoot } from '../../shared/local-fs'
 import { isAgentFrameworkId } from '../../shared/agent-framework-id'
 import { isLanguagePreference } from '../../shared/locale'
 import { normalizeNetworkProxySettings } from '../../shared/network-proxy'
+import { s3SettingsSchema } from '../../shared/s3-sync'
 import type { NotebookLanguage } from '../../shared/notebook-language-contract'
 import { normalizeNotebookNetworkSettings } from '../../shared/notebook-network'
 import type { RuntimeEnablement } from '../../shared/notebook-runtime'
@@ -324,6 +325,8 @@ const sanitizeSettings = (value: unknown): StoredSettings => {
   if (packageMirror) settings.packageMirror = packageMirror
   const networkProxy = normalizeNetworkProxySettings(value.networkProxy)
   if (networkProxy && networkProxy.mode !== 'system') settings.networkProxy = networkProxy
+  const s3 = s3SettingsSchema.safeParse(value.s3)
+  if (s3.success) settings.s3 = s3.data
   const notebookFolderRestrictionEnabled = asBoolean(value.notebookFolderRestrictionEnabled)
   if (notebookFolderRestrictionEnabled !== undefined) {
     settings.notebookFolderRestrictionEnabled = notebookFolderRestrictionEnabled

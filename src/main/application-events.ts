@@ -84,6 +84,7 @@ export type ApplicationEventMap = {
   'sessions:flush-aborted': SessionPersistenceFlushAbortedEvent | undefined
   'sessions:flush-request': SessionPersistenceFlushRequest
   'project-files:changed': ProjectFilesChangedEvent
+  's3-sync:changed': import('../shared/s3-sync').S3SyncStatus
   'permissions:changed': PermissionGrantsChangedEvent
   'literature:changed': LiteratureChangedEvent
   'pdf-annotations:changed': PdfAnnotationsChangedEvent

@@ -19,7 +19,11 @@ import type { ApplicationEvents } from '../application-events'
 import { SessionReplayRepository } from '../session-replay/repository'
 import { SessionReplayService } from '../session-replay/service'
 import { getProjectDbClient } from '../projects/prisma-client'
-import { resolveConfigRoot } from '../storage-root'
+import { resolveConfigRoot, resolveDataRoot } from '../storage-root'
+import { join } from 'node:path'
+import { S3UploadService } from '../s3/upload-service'
+import { registerS3IpcHandlers } from '../s3/ipc'
+import { hasConfiguredIpcHandlerRegistry } from '../ipc-handler-registry'
 import { createAcpRuntime } from '../acp/runtime-composition'
 import { type ApplicationCommandCompositionDependencies } from '../application-command-composition'
 import { createCliCommandOwner } from '../cli-install/ipc'
@@ -224,6 +228,14 @@ export function composeCommandDependencies({
       localShell: settingsEffects.settingsWorkflows.localShell,
       snapshotCommits: settingsBootstrap.settingsSnapshotCommits,
       emitInstallEvent: (event) => broadcastToRenderers(SETTINGS_INSTALL_LOG_CHANNEL, event),
+      s3Uploads: {
+        uploadFiles: (request: {
+          projectId: string
+          fileIds: string[]
+          destinationPrefix: string
+        }) => s3UploadService.uploadFilesManually(request),
+        createFolder: (prefix: string) => s3UploadService.createDestinationFolder(prefix)
+      },
       listAppIconPreviews
     },
     settingsIntegration: {
@@ -570,5 +582,58 @@ export function composeCommandDependencies({
       update: handoff.updateCommandOwner
     }
   }
+
+  // Serial S3 auto-upload: per-project opt-in uploads every indexed project file one at a time,
+  // tracked by a durable ledger under the data root so restarts never re-upload completed files.
+  const s3UploadService = new S3UploadService(
+    {
+      getS3Settings: () => settingsBootstrap.settingsService.getS3Settings(),
+      getProject: (projectId) => sessionPackages.projectRepository.get(projectId),
+      listProjects: () => sessionPackages.projectRepository.list(),
+      listFiles: (projectId, cursor) =>
+        sessionAuthority.projectFilesRepository.listFiles({
+          projectId,
+          collection: { kind: 'all' },
+          cursor,
+          limit: 100
+        }),
+      readFileContent: async (item) => {
+        const lease = await managedFileVersionService.openVersion(
+          {
+            source: item.source,
+            projectId: item.projectId,
+            fileId: item.sourceFileId
+          },
+          item.sourceVersionId
+        )
+        try {
+          return Buffer.from(await lease.readRange(0, Number(lease.size)))
+        } finally {
+          await lease.close()
+        }
+      },
+      publish: (status) => broadcastToRenderers('s3-sync:changed', status)
+    },
+    join(resolveDataRoot(), 's3-sync', 'ledger.json')
+  )
+  applicationEvents.subscribe((event) => {
+    if (event.channel === 'project-files:changed') {
+      s3UploadService.notifyProjectFilesChanged(event.payload.projectId)
+    } else if (event.channel === 'project:created' || event.channel === 'project:updated') {
+      s3UploadService.notifyProjectChanged(event.payload)
+    }
+  })
+  // Reconcile once at startup so files missed while the app was closed still upload.
+  setImmediate(() => {
+    try {
+      void s3UploadService.reconcileAll().catch(() => undefined)
+    } catch {
+      // Non-Electron hosts (tests) have no renderer broadcast channel.
+    }
+  })
+  if (hasConfiguredIpcHandlerRegistry()) {
+    registerS3IpcHandlers(s3UploadService)
+  }
+
   return { applicationCommandDependencies }
 }

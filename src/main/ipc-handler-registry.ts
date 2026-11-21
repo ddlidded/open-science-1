@@ -221,6 +221,7 @@ const installedRegistry = (): IpcHandlerRegistry => {
   if (!defaultRegistry) throw new Error('Electron IPC is unavailable in this host.')
   return defaultRegistry
 }
+const hasConfiguredIpcHandlerRegistry = (): boolean => defaultRegistry !== undefined
 const ipcMainHandle: IpcMain['handle'] = (channel, listener) =>
   installedRegistry().ipcMainHandle(channel, listener)
 const disposeIpcHandlerRegistry = (): void => installedRegistry().dispose()
@@ -231,6 +232,7 @@ export {
   createIpcHandlerInstallationScope,
   createIpcHandlerRegistry,
   disposeIpcHandlerRegistry,
+  hasConfiguredIpcHandlerRegistry,
   ipcMainHandle
 }
 export type { IpcHandlerInstallation, IpcHandlerInstallationScope, IpcHandlerRegistryDiagnostics }

@@ -3,6 +3,7 @@ import {
   imageModelsMigration,
   IMAGE_MODELS_ALLOWED_SUFFIX_CHECKS
 } from './migrations/0060-image-models'
+import { projectS3AutoUploadMigration } from './migrations/0061-project-s3-auto-upload'
 import { computeKubernetesWorkspaceMigration } from './migrations/0056-compute-kubernetes-workspace'
 import { sessionDiscussionParentMigration } from './migrations/0055-session-discussion-parent'
 import { projectOptimizationPromptMigration } from './migrations/0057-project-optimization-prompt'
@@ -1083,6 +1084,16 @@ const MIGRATION_MANIFEST = [
       imageModelsMigration.statements,
       imageModelsMigration.verifiers,
       imageModelsMigration.operations
+    ),
+    backupOnApply: 'required',
+    backupRetention: 'retain'
+  },
+  {
+    ...projectS3AutoUploadMigration,
+    checksum: checksumMigrationPayload(
+      projectS3AutoUploadMigration.id,
+      projectS3AutoUploadMigration.statements,
+      projectS3AutoUploadMigration.verifiers
     ),
     backupOnApply: 'required',
     backupRetention: 'retain'

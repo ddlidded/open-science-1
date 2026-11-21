@@ -215,7 +215,17 @@ import type {
 } from './connector-settings'
 import { ConnectorSettingsModule, type CustomServerSecurityChangeGuard } from './connector-settings'
 import { getCredentialStore } from './credential-store-mode'
-import { isCredentialStorageAvailable, isEncryptionAvailable } from './crypto'
+import { isCredentialStorageAvailable, isEncryptionAvailable, encryptKey, decryptKey } from './crypto'
+import { S3Client } from '../s3/client'
+import { s3SettingsDraftSchema } from '../../shared/s3-sync'
+import { normalizeS3Prefix } from '../s3/upload-service'
+import type {
+  S3FolderListing,
+  S3Settings,
+  S3SettingsDraft,
+  S3SettingsView,
+  S3TestConnectionResult
+} from '../../shared/s3-sync'
 import { DeviceCredentialStore, type ResolvedOAuthDeviceCredential } from './device-credentials'
 import { createSettingsIdSequence } from './id-sequence'
 import type { LocalShellRuntimeMutation } from './local-shell-runtime-mutation'
@@ -867,6 +877,112 @@ class SettingsService {
 
   async setNotebookNetwork(request: SetNotebookNetworkRequest): Promise<NotebookNetworkSettings> {
     return this.notebookNetwork.set(request)
+  }
+
+  // Internal read for the S3 upload service — includes the encrypted key ref, so it must never be
+  // projected into a renderer snapshot.
+  async getS3Settings(): Promise<S3Settings | undefined> {
+    return (await this.repository.getSettings()).s3
+  }
+
+  async setS3Settings(draft: S3SettingsDraft): Promise<S3SettingsView | undefined> {
+    const parsed = s3SettingsDraftSchema.parse(draft)
+    if (parsed.reset) {
+      await this.repository.setS3(undefined)
+      return undefined
+    }
+    const current = (await this.repository.getSettings()).s3
+    const next: S3Settings = {
+      endpoint: (parsed.endpoint ?? current?.endpoint ?? '').trim().replace(/\/+$/, ''),
+      region: (parsed.region ?? current?.region)?.trim() || undefined,
+      bucket: (parsed.bucket ?? current?.bucket ?? '').trim(),
+      accessKeyId: (parsed.accessKeyId ?? current?.accessKeyId ?? '').trim(),
+      secretKeyRef: parsed.secretAccessKey?.trim()
+        ? encryptKey(parsed.secretAccessKey.trim())
+        : current?.secretKeyRef,
+      pathPrefix: parsed.pathPrefix ?? current?.pathPrefix,
+      enabled: parsed.enabled ?? current?.enabled ?? true
+    }
+    const isEmpty =
+      !next.endpoint && !next.bucket && !next.accessKeyId && !next.secretKeyRef
+    if (isEmpty) {
+      await this.repository.setS3(undefined)
+      return undefined
+    }
+    if (!next.endpoint || !next.bucket || !next.accessKeyId || !next.secretKeyRef) {
+      throw new Error('S3 endpoint, bucket, access key, and secret key are required.')
+    }
+    await this.repository.setS3(next)
+    return {
+      endpoint: next.endpoint,
+      region: next.region,
+      bucket: next.bucket,
+      accessKeyId: next.accessKeyId,
+      hasSecretKey: true,
+      pathPrefix: next.pathPrefix,
+      enabled: next.enabled
+    }
+  }
+
+  // Probes an S3-compatible endpoint. Unsent form fields fall back to the stored configuration and
+  // a missing draft secret reuses the stored one, so "Test connection" works before saving.
+  async testS3Connection(draft: S3SettingsDraft = {}): Promise<S3TestConnectionResult> {
+    const parsed = s3SettingsDraftSchema.parse(draft)
+    const current = (await this.repository.getSettings()).s3
+    const endpoint = (parsed.endpoint ?? current?.endpoint ?? '').trim()
+    const bucket = (parsed.bucket ?? current?.bucket ?? '').trim()
+    const accessKeyId = (parsed.accessKeyId ?? current?.accessKeyId ?? '').trim()
+    const region = (parsed.region ?? current?.region)?.trim() || undefined
+    let secretAccessKey = parsed.secretAccessKey?.trim()
+    if (!secretAccessKey && current?.secretKeyRef) {
+      try {
+        secretAccessKey = decryptKey(current.secretKeyRef)
+      } catch {
+        secretAccessKey = undefined
+      }
+    }
+    if (!endpoint || !bucket || !accessKeyId || !secretAccessKey) {
+      return { ok: false, error: 'S3 endpoint, bucket, access key, and secret key are required.' }
+    }
+    const client = new S3Client({ endpoint, region, bucket, accessKeyId, secretAccessKey })
+    return client.testConnection()
+  }
+
+  // Lists one level of folders inside the configured bucket for the manual-upload destination
+  // picker. Uses the stored configuration only — there is no unsaved draft to honor.
+  async listS3Folders(request: { prefix?: string } = {}): Promise<S3FolderListing> {
+    const current = (await this.repository.getSettings()).s3
+    if (
+      !current ||
+      current.enabled === false ||
+      !current.endpoint ||
+      !current.bucket ||
+      !current.accessKeyId ||
+      !current.secretKeyRef
+    ) {
+      throw new Error('S3 storage is not configured.')
+    }
+    const secretAccessKey = decryptKey(current.secretKeyRef)
+    const client = new S3Client({
+      endpoint: current.endpoint,
+      region: current.region,
+      bucket: current.bucket,
+      accessKeyId: current.accessKeyId,
+      secretAccessKey
+    })
+    const base = normalizeS3Prefix(current.pathPrefix)
+    const inside = `${base}${normalizeS3Prefix(request.prefix ?? '')}`
+    const listing = await client.listFolders(inside)
+    return {
+      prefix: normalizeS3Prefix(request.prefix ?? ''),
+      folders: listing.folders
+        .filter((folder) => folder.startsWith(base))
+        .map((folder) => folder.slice(base.length)),
+      files: listing.files
+        .filter((key) => key.startsWith(base))
+        .map((key) => key.slice(base.length)),
+      truncated: listing.truncated
+    }
   }
 
   reviewNotebookPrivateDestination(

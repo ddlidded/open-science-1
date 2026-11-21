@@ -2,7 +2,16 @@ import { FOCUS_COMPOSER_EVENT } from './composer-focus-events'
 import { ErrorNotice } from '@/components/error-notice'
 // Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4
 import type { TFunction } from 'i18next'
-import { ChevronDown, LayoutGrid, List, Maximize2, Minimize2, Search, X } from 'lucide-react'
+import {
+  ChevronDown,
+  LayoutGrid,
+  List,
+  Maximize2,
+  Minimize2,
+  Search,
+  Upload,
+  X
+} from 'lucide-react'
 import { ToggleGroup } from 'radix-ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -29,6 +38,7 @@ import { createPreviewFileItem } from './preview-file-item'
 import { FileBrowserModal } from '../settings/FileBrowserModal'
 import { GrantFolderAccessDialog } from './GrantFolderAccessDialog'
 import { LocalFileBrowser } from './LocalFileBrowser'
+import { S3UploadDialog } from './S3UploadDialog'
 import {
   useProjectFilePreviewReader,
   useProjectFilePreviews,
@@ -510,6 +520,8 @@ const ProjectFilesViewContent = ({
 
   const grantedRoots = useGrantedFoldersStore((state) => state.roots)
   const isLocalMode = sourceMode === 'local'
+  const s3Enabled = useSettingsStore((state) => state.s3?.enabled === true)
+  const [s3UploadOpen, setS3UploadOpen] = useState(false)
   // The granted folder the local browser is scoped to; a revoked root reads as the machine itself.
   const selectedLocalRoot = selectedLocalRootId
     ? grantedRoots.find((root) => root.id === selectedLocalRootId)
@@ -627,6 +639,26 @@ const ProjectFilesViewContent = ({
                 </Tooltip>
               </ToggleGroup.Root>
             )}
+            {s3Enabled && !isLocalMode && activeProjectId ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    data-testid="open-s3-upload"
+                    className="rounded-md text-text-000 hover:bg-muted"
+                    aria-label={t('Upload files to S3 storage')}
+                    onClick={() => setS3UploadOpen(true)}
+                  >
+                    <Upload className="size-4" strokeWidth={1.8} aria-hidden="true" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="z-[70]">
+                  {t('Upload files to S3 storage')}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -878,6 +910,13 @@ const ProjectFilesViewContent = ({
         onOpenChange={setGrantDialogOpen}
         onGranted={handleSelectGrantedRoot}
       />
+      {activeProjectId ? (
+        <S3UploadDialog
+          projectId={activeProjectId}
+          open={s3UploadOpen}
+          onOpenChange={setS3UploadOpen}
+        />
+      ) : null}
     </div>
   )
 }

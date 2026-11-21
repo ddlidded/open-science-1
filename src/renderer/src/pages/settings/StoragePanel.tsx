@@ -41,6 +41,7 @@ import type {
   UsageCategoryKey
 } from '../../../../shared/storage'
 import { PdfParsingCacheAction } from './PdfParsingCacheAction'
+import { S3StorageSection } from './S3StorageSection'
 import { SettingsSection } from './SettingsLayout'
 import { isAgentRepairCheck } from '@/lib/settings-navigation'
 import { StorageMigrationModal } from './StorageMigrationModal'
@@ -994,6 +995,7 @@ const StoragePanel = ({ onContinueToAgent }: StoragePanelProps): React.JSX.Eleme
           onClose={handleMigrationClose}
         />
       ) : null}
+      <S3StorageSection />
       <PdfParsingCacheAction />
     </div>
   )

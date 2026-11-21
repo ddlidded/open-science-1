@@ -80,6 +80,7 @@ const toProject = (row: PrismaProject): Project => ({
   sessionDefaults: decodeProjectSessionDefaults(row.sessionDefaults),
   isExample: row.isExample,
   ...(row.pinned ? { pinned: true } : {}),
+  ...(row.s3AutoUpload ? { s3AutoUpload: true } : {}),
   ...(row.archivedAt ? { archivedAt: row.archivedAt.getTime() } : {}),
   archiveRevision: row.archiveRevision,
   createdAt: row.createdAt.getTime(),
@@ -152,7 +153,8 @@ class ProjectRepository {
         name,
         description: request.description?.trim() ?? '',
         agentContext: request.agentContext?.trim() ?? '',
-        optimizationPrompt: request.optimizationPrompt?.trim() ?? ''
+        optimizationPrompt: request.optimizationPrompt?.trim() ?? '',
+        s3AutoUpload: request.s3AutoUpload === true
       }
     })
 
@@ -169,6 +171,7 @@ class ProjectRepository {
       optimizationPrompt?: string
       sessionDefaults?: string
       pinned?: boolean
+      s3AutoUpload?: boolean
       updatedAt?: Date
     } = {}
 
@@ -212,7 +215,8 @@ class ProjectRepository {
       request.description === undefined &&
       request.agentContext === undefined &&
       request.optimizationPrompt === undefined &&
-      request.sessionDefaults === undefined
+      request.sessionDefaults === undefined &&
+      request.s3AutoUpload === undefined
     ) {
       // Prisma's @updatedAt automation also runs for administrative changes. Updating only the pin
       // column in SQL avoids both a fake activity bump and a read/write race that could restore an
@@ -231,6 +235,7 @@ class ProjectRepository {
     }
 
     if (request.pinned !== undefined) data.pinned = request.pinned
+    if (request.s3AutoUpload !== undefined) data.s3AutoUpload = request.s3AutoUpload
 
     // Prisma's wall-clock @updatedAt can repeat within one millisecond or move backward after a
     // clock correction. Advance from the caller's compared value so every accepted content edit

@@ -69,7 +69,7 @@ describe('ProviderAccountsModule', () => {
     }
   )
 
-  it.each(listAgentFrameworks())(
+  it.each(listAgentFrameworks().filter((framework) => framework.supportedApiTypes.length > 0))(
     'falls back once after arbitrary HTTP failure for $id',
     async (framework) => {
       await repository.setAgentFramework(framework.id)

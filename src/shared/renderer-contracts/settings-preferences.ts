@@ -42,6 +42,16 @@ import type {
 import type { PackageMirror } from '../mirror'
 
 import type { NetworkProxySettings } from '../network-proxy'
+import type {
+  S3CreateFolderRequest,
+  S3FolderListing,
+  S3SettingsDraft,
+  S3SettingsView,
+  S3SyncStatus,
+  S3TestConnectionResult,
+  S3UploadFilesRequest,
+  S3UploadFilesResult
+} from '../s3-sync'
 
 import type {
   PrivateDestinationRequest,
@@ -51,6 +61,7 @@ import type {
 import type { NotebookNetworkStatus } from '../notebook-network'
 
 import { callable, EVENT, ELECTRON_EVENT, LOCAL, WEB, RUNTIME_VALIDATED } from './definition'
+import type { AcpListener, RemoveListener } from './definition'
 
 export const settingsGetPackageMirrorContracts = {
   'settings.getPackageMirror': callable<() => Promise<PackageMirror>>()('settings', [
@@ -137,6 +148,24 @@ export const settingsSetNetworkProxyContracts = {
   'settings.setNotebookNetwork': callable<
     (request: SetNotebookNetworkRequest) => Promise<NotebookNetworkSettings>
   >()('settings', ['settings:set-notebook-network', LOCAL]),
+  'settings.setS3Settings': callable<
+    (request: S3SettingsDraft) => Promise<S3SettingsView | undefined>
+  >()('settings', ['settings:set-s3-settings', LOCAL]),
+  'settings.testS3Connection': callable<
+    (request: S3SettingsDraft | undefined) => Promise<S3TestConnectionResult>
+  >()('settings', ['settings:test-s3-connection', LOCAL]),
+  'settings.listS3Folders': callable<
+    (request: { prefix?: string } | undefined) => Promise<S3FolderListing>
+  >()('settings', ['settings:list-s3-folders', LOCAL]),
+  'settings.createS3Folder': callable<
+    (request: S3CreateFolderRequest) => Promise<void>
+  >()('settings', ['settings:create-s3-folder', LOCAL]),
+  'settings.uploadProjectFilesToS3': callable<
+    (request: S3UploadFilesRequest) => Promise<S3UploadFilesResult>
+  >()('settings', ['settings:upload-files-to-s3', LOCAL]),
+  'settings.onS3SyncChanged': callable<
+    (listener: AcpListener<S3SyncStatus>) => RemoveListener
+  >()('settings', ['s3-sync:changed', EVENT]),
   'settings.getSourceLinkMetadata': callable<(url: string) => Promise<SourceLinkMetadata>>()(
     'settings',
     ['settings:get-source-link-metadata', WEB]

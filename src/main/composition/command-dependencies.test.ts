@@ -35,7 +35,10 @@ vi.mock('../agents/completion-handoff-ipc', () => ({
   createCompletionHandoffCommands: () => ({})
 }))
 vi.mock('../network-ipc', () => ({ createNetworkCommandOwner: () => ({}) }))
-vi.mock('../storage-root', () => ({ resolveConfigRoot: () => '/config-fixture' }))
+vi.mock('../storage-root', () => ({
+  resolveConfigRoot: () => '/config-fixture',
+  resolveDataRoot: () => '/data-fixture'
+}))
 vi.mock('../projects/prisma-client', () => ({ getProjectDbClient: vi.fn() }))
 vi.mock('../desktop-interaction', () => ({
   desktopFileInteraction: () => ({ chooseFiles: infrastructure.chooseFiles })
@@ -103,7 +106,10 @@ function fixture() {
   const input = {
     localeOwner: {},
     sideChatCommands: {},
-    applicationEvents: {},
+    applicationEvents: {
+      publish: vi.fn(),
+      subscribe: vi.fn(() => () => {})
+    },
     reportUploadProgress: vi.fn(),
     settingsBootstrap: {
       settingsService: { getComputeBookmarks: vi.fn(), setComputeBookmarks: vi.fn() },

@@ -323,6 +323,9 @@ export type StoredSettings = {
   packageMirror?: PackageMirror
   // Application-wide proxy preference. Absent in historical documents means follow the system.
   networkProxy?: NetworkProxySettings
+  // Custom S3-compatible object-storage destination for per-project auto-upload. secretKeyRef holds
+  // the OS-encrypted secret key ref, never plaintext. Absent means not configured.
+  s3?: import('../../shared/s3-sync').S3Settings
   // Application-wide egress policy for Notebook REPL and Notebook Bash processes.
   notebookFolderRestrictionEnabled?: boolean
   notebookNetwork?: NotebookNetworkSettings

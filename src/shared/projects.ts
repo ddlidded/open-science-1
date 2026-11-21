@@ -31,6 +31,8 @@ export const projectSchema = z
     isExample: z.boolean(),
     // Optional on the wire for compatibility with older persisted payloads; absence means unpinned.
     pinned: z.boolean().optional(),
+    // Opt-in per-Project S3 auto-upload. Absence on older payloads means disabled.
+    s3AutoUpload: z.boolean().optional(),
     // An absent timestamp keeps the Project on active surfaces. Archive is reversible and does not
     // affect the Project's research activity ordering.
     archivedAt: z.number().finite().optional(),
@@ -46,7 +48,8 @@ export const createProjectRequestSchema = z
     name: z.string().max(PROJECT_NAME_MAX_LENGTH),
     description: z.string().max(PROJECT_DESCRIPTION_MAX_LENGTH).optional(),
     agentContext: z.string().max(16000).optional(),
-    optimizationPrompt: z.string().max(16000).optional()
+    optimizationPrompt: z.string().max(16000).optional(),
+    s3AutoUpload: z.boolean().optional()
   })
   .strict()
 
@@ -59,7 +62,8 @@ export const updateProjectRequestSchema = z
     agentContext: z.string().max(16000).optional(),
     optimizationPrompt: z.string().max(16000).optional(),
     sessionDefaults: projectSessionDefaultsSchema.optional(),
-    pinned: z.boolean().optional()
+    pinned: z.boolean().optional(),
+    s3AutoUpload: z.boolean().optional()
   })
   .strict()
 

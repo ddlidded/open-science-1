@@ -25,15 +25,21 @@ it('appends 0059 history after the 0058 schedules tail and preserves existing ap
     client,
     MIGRATION_MANIFEST.filter(({ id }) => id <= '0058_session_schedules')
   )
-  const project = await client.project.create({
-    data: { id: 'existing', name: 'Existing project' }
-  })
+  // Raw insert: the released 0058 schema has no s3AutoUpload column, but the Prisma client writes
+  // every defaulted scalar — a typed create() would reference a column that only 0061 adds.
+  await client.$executeRawUnsafe(
+    `INSERT INTO "Project" ("id", "name", "description", "agentContext", "sessionDefaults", "isExample", "pinned", "archiveRevision", "optimizationPrompt", "createdAt", "updatedAt")
+     VALUES ('existing', 'Existing project', '', '', '{}', false, false, 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+  )
   expect(await migrateApplicationDatabase(client)).toMatchObject({
     from: '0058_session_schedules',
-    to: '0060_image_models',
-    applied: ['0059_session_history', '0060_image_models']
+    to: '0061_project_s3_auto_upload',
+    applied: ['0059_session_history', '0060_image_models', '0061_project_s3_auto_upload']
   })
-  expect(await client.project.findUnique({ where: { id: project.id } })).toEqual(project)
+  expect(await client.project.findUnique({ where: { id: 'existing' } })).toMatchObject({
+    id: 'existing',
+    name: 'Existing project'
+  })
   expect(await client.sessionHistoryIndex.count()).toBe(0)
   expect(await client.sessionHistoryItem.count()).toBe(0)
   expect(await migrateApplicationDatabase(client)).toMatchObject({ applied: [] })
@@ -138,7 +144,7 @@ it('upgrades the released 0055 JSONL ledger after the upstream suffix', async ()
   const result = await migrateApplicationDatabase(db)
   expect(result).toMatchObject({
     from: '0055_session_history',
-    to: '0060_image_models'
+    to: '0061_project_s3_auto_upload'
   })
   expect(result.applied).toEqual([
     '0055_session_discussion_parent',
@@ -146,7 +152,8 @@ it('upgrades the released 0055 JSONL ledger after the upstream suffix', async ()
     '0057_project_optimization_prompt',
     '0058_session_schedules',
     '0059_session_history',
-    '0060_image_models'
+    '0060_image_models',
+    '0061_project_s3_auto_upload'
   ])
   expect(await db.sessionHistoryIndex.findMany({ include: { items: true } })).toEqual(before)
   expect(await db.$queryRawUnsafe('SELECT id FROM _open_science_migrations ORDER BY id')).toEqual(
@@ -157,7 +164,7 @@ it('upgrades the released 0055 JSONL ledger after the upstream suffix', async ()
   )
   expect(await migrateApplicationDatabase(db)).toMatchObject({
     applied: [],
-    to: '0060_image_models'
+    to: '0061_project_s3_auto_upload'
   })
 })
 
@@ -188,14 +195,15 @@ it('resumes the released 0055 JSONL upgrade after an interrupted upstream suffix
   const result = await migrateApplicationDatabase(db)
   expect(result).toMatchObject({
     from: '0055_session_discussion_parent',
-    to: '0060_image_models'
+    to: '0061_project_s3_auto_upload'
   })
   expect(result.applied).toEqual([
     '0056_compute_kubernetes_workspace',
     '0057_project_optimization_prompt',
     '0058_session_schedules',
     '0059_session_history',
-    '0060_image_models'
+    '0060_image_models',
+    '0061_project_s3_auto_upload'
   ])
   expect(await db.sessionHistoryIndex.findMany({ include: { items: true } })).toEqual(before)
   expect(await db.$queryRawUnsafe('SELECT id FROM _open_science_migrations ORDER BY id')).toEqual(
@@ -292,13 +300,14 @@ it('upgrades the released 0058 JSONL ledger after the schedules reassignment', a
   const result = await migrateApplicationDatabase(db)
   expect(result).toMatchObject({
     from: '0058_session_history',
-    to: '0060_image_models'
+    to: '0061_project_s3_auto_upload'
   })
   // The upstream suffix starts at 0058 schedules because the fork's 0058 used that number.
   expect(result.applied).toEqual([
     '0058_session_schedules',
     '0059_session_history',
-    '0060_image_models'
+    '0060_image_models',
+    '0061_project_s3_auto_upload'
   ])
   expect(await db.project.findUnique({ where: { id: 'existing' } })).toMatchObject({
     name: 'Existing project'
@@ -328,7 +337,7 @@ it('upgrades the released 0058 JSONL ledger after the schedules reassignment', a
   }
   expect(await migrateApplicationDatabase(db)).toMatchObject({
     applied: [],
-    to: '0060_image_models'
+    to: '0061_project_s3_auto_upload'
   })
   expect(await db.sessionHistoryIndex.findMany({ include: { items: true } })).toEqual(before)
 })
@@ -378,12 +387,13 @@ it('resumes after an interruption before the first bridged migration', async () 
   const result = await migrateApplicationDatabase(db)
   expect(result).toMatchObject({
     from: '0058_session_history',
-    to: '0060_image_models'
+    to: '0061_project_s3_auto_upload'
   })
   expect(result.applied).toEqual([
     '0058_session_schedules',
     '0059_session_history',
-    '0060_image_models'
+    '0060_image_models',
+    '0061_project_s3_auto_upload'
   ])
   expect(await db.sessionHistoryIndex.findMany({ include: { items: true } })).toEqual(before)
   expect(await db.$queryRawUnsafe('SELECT id FROM _open_science_migrations ORDER BY id')).toEqual(
@@ -463,12 +473,13 @@ it('rolls back the frozen ledger row when the first bridged migration fails', as
   const result = await migrateApplicationDatabase(db)
   expect(result).toMatchObject({
     from: '0058_session_history',
-    to: '0060_image_models'
+    to: '0061_project_s3_auto_upload'
   })
   expect(result.applied).toEqual([
     '0058_session_schedules',
     '0059_session_history',
-    '0060_image_models'
+    '0060_image_models',
+    '0061_project_s3_auto_upload'
   ])
   expect(await db.sessionHistoryIndex.findMany({ include: { items: true } })).toEqual(before)
 })
@@ -496,9 +507,9 @@ it('resumes the released 0058 upgrade after an interrupted 0059 migration', asyn
   const result = await migrateApplicationDatabase(db)
   expect(result).toMatchObject({
     from: '0058_session_schedules',
-    to: '0060_image_models'
+    to: '0061_project_s3_auto_upload'
   })
-  expect(result.applied).toEqual(['0059_session_history', '0060_image_models'])
+  expect(result.applied).toEqual(['0059_session_history', '0060_image_models', '0061_project_s3_auto_upload'])
   expect(await db.sessionHistoryIndex.findMany({ include: { items: true } })).toEqual(before)
   expect(await db.$queryRawUnsafe('SELECT id FROM _open_science_migrations ORDER BY id')).toEqual(
     MIGRATION_MANIFEST.map(({ id }) => ({ id }))
@@ -566,7 +577,7 @@ it.each([false, true])(
     const result = await migrateApplicationDatabase(db)
     expect(result).toMatchObject({
       from: interrupted ? '0051_literature_reading_status' : '0051_session_history',
-      to: '0060_image_models'
+      to: '0061_project_s3_auto_upload'
     })
     expect(await db.project.findUnique({ where: { id: 'existing' } })).toMatchObject({
       name: 'Existing project'

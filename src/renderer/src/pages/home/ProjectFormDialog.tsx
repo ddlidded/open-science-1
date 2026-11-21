@@ -38,6 +38,7 @@ type ProjectFormDialogProps = {
   descriptionDraft: string
   agentContextDraft: string
   optimizationPromptDraft: string
+  s3AutoUploadDraft: boolean
   isSubmitting: boolean
   error: string | undefined
   errorDetail?: string
@@ -48,6 +49,7 @@ type ProjectFormDialogProps = {
   onDescriptionChange: (value: string) => void
   onAgentContextChange: (value: string) => void
   onOptimizationPromptChange: (value: string) => void
+  onS3AutoUploadChange: (value: boolean) => void
   discardConfirmationOpen: boolean
   onKeepEditing: () => void
   onDiscardChanges: () => void
@@ -66,6 +68,7 @@ const ProjectFormDialog = ({
   descriptionDraft,
   agentContextDraft,
   optimizationPromptDraft,
+  s3AutoUploadDraft,
   isSubmitting,
   error,
   errorDetail,
@@ -76,6 +79,7 @@ const ProjectFormDialog = ({
   onDescriptionChange,
   onAgentContextChange,
   onOptimizationPromptChange,
+  onS3AutoUploadChange,
   discardConfirmationOpen,
   onKeepEditing,
   onDiscardChanges,
@@ -243,6 +247,25 @@ const ProjectFormDialog = ({
                   </div>
                 </div>
               </details>
+              <label
+                className="flex items-center gap-2 border-t border-border pt-3 text-sm text-foreground"
+                htmlFor="project-form-s3-auto-upload"
+              >
+                <input
+                  id="project-form-s3-auto-upload"
+                  type="checkbox"
+                  className="size-4 accent-primary"
+                  checked={s3AutoUploadDraft}
+                  disabled={isSubmitting}
+                  onChange={(event) => onS3AutoUploadChange(event.target.checked)}
+                />
+                <span>
+                  {t('Auto upload all files to S3 storage automatically')}
+                  <span className="block text-xs text-muted-foreground">
+                    {t('New and existing project files are uploaded one at a time to the configured S3 server.')}
+                  </span>
+                </span>
+              </label>
             </div>
             {error ? (
               <p className="px-5 pb-4 text-sm text-danger-000" role="alert">

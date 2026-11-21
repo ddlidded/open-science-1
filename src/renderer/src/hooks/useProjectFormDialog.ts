@@ -18,6 +18,7 @@ type ProjectFormDialogProps = {
   descriptionDraft: string
   agentContextDraft: string
   optimizationPromptDraft: string
+  s3AutoUploadDraft: boolean
   isSubmitting: boolean
   error: string | undefined
   errorDetail?: string
@@ -28,6 +29,7 @@ type ProjectFormDialogProps = {
   onDescriptionChange: (value: string) => void
   onAgentContextChange: (value: string) => void
   onOptimizationPromptChange: (value: string) => void
+  onS3AutoUploadChange: (value: boolean) => void
   discardConfirmationOpen: boolean
   onKeepEditing: () => void
   onDiscardChanges: () => void
@@ -62,6 +64,7 @@ const useProjectFormDialog = (
   const [descriptionDraft, setDescriptionDraft] = useState('')
   const [agentContextDraft, setAgentContextDraft] = useState('')
   const [optimizationPromptDraft, setOptimizationPromptDraft] = useState('')
+  const [s3AutoUploadDraft, setS3AutoUploadDraft] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorDetail, setErrorDetail] = useState<string>()
   const [conflictProject, setConflictProject] = useState<Project>()
@@ -71,7 +74,8 @@ const useProjectFormDialog = (
     name: '',
     description: '',
     agentContext: '',
-    optimizationPrompt: ''
+    optimizationPrompt: '',
+    s3AutoUpload: false
   })
 
   const openCreateDialog = useCallback((): void => {
@@ -82,7 +86,8 @@ const useProjectFormDialog = (
       name: '',
       description: '',
       agentContext: '',
-      optimizationPrompt: ''
+      optimizationPrompt: '',
+      s3AutoUpload: false
     }
     setDiscardConfirmationOpen(false)
     setConflictProject(undefined)
@@ -91,6 +96,7 @@ const useProjectFormDialog = (
     setDescriptionDraft('')
     setAgentContextDraft('')
     setOptimizationPromptDraft('')
+    setS3AutoUploadDraft(false)
     setFormError(undefined)
     setErrorDetail(undefined)
   }, [isSubmitting])
@@ -104,7 +110,8 @@ const useProjectFormDialog = (
         name: project.name,
         description: project.description,
         agentContext: project.agentContext ?? '',
-        optimizationPrompt: project.optimizationPrompt ?? ''
+        optimizationPrompt: project.optimizationPrompt ?? '',
+        s3AutoUpload: project.s3AutoUpload === true
       }
       setDiscardConfirmationOpen(false)
       setConflictProject(undefined)
@@ -117,6 +124,7 @@ const useProjectFormDialog = (
       setDescriptionDraft(project.description)
       setAgentContextDraft(project.agentContext ?? '')
       setOptimizationPromptDraft(project.optimizationPrompt ?? '')
+      setS3AutoUploadDraft(project.s3AutoUpload === true)
       setFormError(undefined)
       setErrorDetail(undefined)
     },
@@ -136,7 +144,8 @@ const useProjectFormDialog = (
       nameDraft !== initialDraft.current.name ||
       descriptionDraft !== initialDraft.current.description ||
       agentContextDraft !== initialDraft.current.agentContext ||
-      optimizationPromptDraft !== initialDraft.current.optimizationPrompt
+      optimizationPromptDraft !== initialDraft.current.optimizationPrompt ||
+      s3AutoUploadDraft !== initialDraft.current.s3AutoUpload
     ) {
       setDiscardConfirmationOpen(true)
       return
@@ -167,7 +176,8 @@ const useProjectFormDialog = (
           name,
           description,
           agentContext,
-          optimizationPrompt
+          optimizationPrompt,
+          s3AutoUpload: s3AutoUploadDraft
         })
       : updateProject({
           id: formState.projectId,
@@ -175,6 +185,7 @@ const useProjectFormDialog = (
           description,
           agentContext,
           optimizationPrompt,
+          s3AutoUpload: s3AutoUploadDraft,
           expectedUpdatedAt: formState.expectedUpdatedAt
         })
 
@@ -243,6 +254,7 @@ const useProjectFormDialog = (
       descriptionDraft,
       agentContextDraft,
       optimizationPromptDraft,
+      s3AutoUploadDraft,
       isSubmitting,
       error: formError,
       errorDetail,
@@ -254,8 +266,10 @@ const useProjectFormDialog = (
               name: conflictProject.name,
               description: conflictProject.description,
               agentContext: conflictProject.agentContext ?? '',
-              optimizationPrompt: conflictProject.optimizationPrompt ?? ''
+              optimizationPrompt: conflictProject.optimizationPrompt ?? '',
+              s3AutoUpload: conflictProject.s3AutoUpload === true
             }
+            setS3AutoUploadDraft(conflictProject.s3AutoUpload === true)
             setFormState({
               mode: 'edit',
               projectId: conflictProject.id,
@@ -270,6 +284,7 @@ const useProjectFormDialog = (
       onDescriptionChange: setDescriptionDraft,
       onAgentContextChange: setAgentContextDraft,
       onOptimizationPromptChange: setOptimizationPromptDraft,
+      onS3AutoUploadChange: setS3AutoUploadDraft,
       discardConfirmationOpen,
       onKeepEditing: () => setDiscardConfirmationOpen(false),
       onDiscardChanges: closeFormDialog,

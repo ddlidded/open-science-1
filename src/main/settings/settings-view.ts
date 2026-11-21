@@ -66,6 +66,18 @@ export const buildSettingsSnapshot = (
     onboardingCompletedAt: preferences.onboardingCompletedAt,
     packageMirror: settings.packageMirror,
     networkProxy: resolveNetworkProxySettings(settings.networkProxy),
+    // The stored secret stays behind its encrypted ref; the renderer only learns that one exists.
+    s3: settings.s3
+      ? {
+          endpoint: settings.s3.endpoint,
+          region: settings.s3.region,
+          bucket: settings.s3.bucket,
+          accessKeyId: settings.s3.accessKeyId,
+          hasSecretKey: typeof settings.s3.secretKeyRef === 'string',
+          pathPrefix: settings.s3.pathPrefix,
+          enabled: settings.s3.enabled
+        }
+      : undefined,
     notebookFolderRestrictionEnabled: settings.notebookFolderRestrictionEnabled !== false,
     notebookNetwork: settings.notebookNetwork
       ? normalizeNotebookNetworkSettings(settings.notebookNetwork)

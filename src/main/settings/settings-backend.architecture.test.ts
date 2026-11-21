@@ -339,6 +339,7 @@ describe('Settings backend ownership architecture', () => {
       'clearCodexInfo',
       'clearCodexIsolatedValidationIfExists',
       'clearComputeGrants',
+      'clearDevinInfo',
       'clearGrantedLocalRoots',
       'clearOpencodeInfo',
       'completeCustomServerDeletion',
@@ -376,6 +377,7 @@ describe('Settings backend ownership architecture', () => {
       'setCustomServersEnabled',
       'setDataRoot',
       'setDefaultPermissionProfile',
+      'setDevinInfo',
       'setGitHubToken',
       'setLocalShellRuntime',
       'setLocalePreference',
@@ -393,6 +395,7 @@ describe('Settings backend ownership architecture', () => {
       'setReasoningEffort',
       'setReviewerModel',
       'setRuntimeEnablement',
+      'setS3',
       'setSessionDetailsModel',
       'setShowNotificationContent',
       'setSkillEnabled',
@@ -505,12 +508,12 @@ describe('Settings backend ownership architecture', () => {
         addCustomServer addManualInterpreter admitReviewerExecutionModel admitSessionDetailsExecutionTarget admitSubagentExecutionModel admitVisionModel allowNotebookNetworkDestination allowNotebookNetworkDomain authenticateCustomServer authenticateDeviceCredential bootstrap buildCustomServerTemplateExport
         buildSkillExport beginLabLogin beginXaiOAuthLogin cancelClaudeIsolatedLogin cancelClaudeLogin cancelCodexLogin cancelLabLogin checkLab cancelCustomServerAuthentication cancelDeviceCredentialAuthentication cancelXaiOAuthLogin captureActiveAgentBackendSelection captureActiveExplicitAgentBackendTarget checkEnvironment classification clearGrantedLocalRoots codeBuddySkillCatalog codexSkillCatalog
         codexSkillDescriptorsForIds createDeviceCredential createSkill deleteProvider deleteSkill detectClaude detectCodeBuddy detectCodex
-        detectOpencode deviceCredentialConsumerIds deviceCredentialIdForServer disconnectCustomServer disconnectDeviceCredential dismissLegacyDataMovePrompt getActiveInstallId getAgentEnvironmentCreationEnabled getAppIconVariant getClosePreference
+        detectDevin detectOpencode deviceCredentialConsumerIds deviceCredentialIdForServer disconnectCustomServer disconnectDeviceCredential dismissLegacyDataMovePrompt getActiveInstallId getAgentEnvironmentCreationEnabled getAppIconVariant getClosePreference
         getComputeBookmarks getConnectorDetail getConnectors getConversationSkillImportEnabled getGitHubTokenStatus getGrantedLocalRoots getLocalShellRuntimePreference getManualInterpreters getComputePythonRuntime getNotebookFolderRestrictionEnabled getNotebookNetwork getNotebookNetworkStatus getNotificationsEnabled getPackageMirror
-        getPreflight getRuntimeEnablement getSettingsView getShowNotificationContent getSkillDetail getSkillMarketplaceBatch getSkillMarketplaceDetail getWslSetupStatus getWsl2BashPreviewStatus hasActiveInstall holdInstallAdmission quiesceAuthentication
+        getPreflight getRuntimeEnablement getS3Settings getSettingsView getShowNotificationContent getSkillDetail getSkillMarketplaceBatch getSkillMarketplaceDetail getWslSetupStatus getWsl2BashPreviewStatus hasActiveInstall holdInstallAdmission quiesceAuthentication
         getLabCase getLabCaseDownload getLabView getStoredSettings importAgentHomeSkills importSkill importSkillArchiveBatch importSkillZip
         cancelNotebookNetworkSetup importSkillZipBatch installClaude installCodeBuddy installCodex installMissingWslDependencies installNotebookNetwork installOpencode installPi installRecommendedWslDistro installSkillMarketplace installWslPlatform isEncryptionAvailable
-        isNpmAvailable listAgentHomeSkills listConnectors listDeviceCredentials listHostSkills listLabCases listSkillMarketplace listSkills listSpecialistSkillCatalog listUserSkills
+        isNpmAvailable listAgentHomeSkills listConnectors listDeviceCredentials listHostSkills listLabCases listS3Folders listSkillMarketplace listSkills listSpecialistSkillCatalog listUserSkills
         dispose codeBuddyAccount initializeLab loginClaudeShared loginIsolatedClaude loginIsolatedClaudeBrowser loginIsolatedCodex
         logoutClaudeShared logoutIsolatedClaude logoutLab logoutIsolatedCodex logoutXaiOAuth markOnboardingComplete
         markPathsNormalized migrateAgentHomeSkillIdentities openHarnessSession openWslTerminal prepareDelegatedSkills previewAgentHomeSkill previewCustomServerTemplateExport
@@ -523,8 +526,8 @@ describe('Settings backend ownership architecture', () => {
         setConversationSkillImportEnabled setCustomServerAuthenticator setCustomServerEnabled
         setDataRoot setDefaultPermissionProfile setDeviceCredentialAuthenticator setEnvironmentEnabled setInstallAuthorized
         setCustomServerRuntimeProjectionProvider setNcbiCredentials setNetworkProxy setNotebookFolderRestrictionEnabled setNotebookNetwork setNotificationsEnabled
-        setOpenAlexCredential setComputePythonRuntime setPackageMirror setProjectFilesFilter setPromptOptimizationModel setReasoningEffort setReviewerModel setSessionDetailsModel setShowNotificationContent setSkillDeletionGuard setSkillEnabled setSkillsEnabled setSubagentModel setVisionModel
-        setLabServer setToolPermission skillNudgeNamesForIds skillsNeedingForceLoad startSkillMarketplaceBatch stopSkillMarketplaceBatch uninstallClaude uninstallCodeBuddy uninstallCodex uninstallPi
+        setOpenAlexCredential setComputePythonRuntime setPackageMirror setProjectFilesFilter setPromptOptimizationModel setReasoningEffort setReviewerModel setS3Settings setSessionDetailsModel setShowNotificationContent setSkillDeletionGuard setSkillEnabled setSkillsEnabled setSubagentModel setVisionModel
+        setLabServer setToolPermission skillNudgeNamesForIds skillsNeedingForceLoad startSkillMarketplaceBatch stopSkillMarketplaceBatch testS3Connection uninstallClaude uninstallCodeBuddy uninstallCodex uninstallPi
         uninstallOpencode updateCustomServer updateDeviceCredential updateSkill uploadLabCase upsertProvider useWsl2Bash validateOpenAlexCredential validateProvider waitLabLogin waitXaiOAuthLogin withHostSkillRead
       `
         .trim()
@@ -687,6 +690,8 @@ describe('Settings backend ownership architecture', () => {
       'dataRoot',
       'dataRootIsInitialDefault',
       'defaultPermissionProfile',
+      'devinPath',
+      'devinVersion',
       'disabledSkillIds',
       'githubTokenMask',
       'githubTokenRef',
@@ -714,6 +719,7 @@ describe('Settings backend ownership architecture', () => {
       'providers',
       'reasoningEffort',
       'reviewerModel',
+      's3',
       'sessionDetailsModel',
       'showNotificationContent',
       'subagentModel',

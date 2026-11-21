@@ -260,7 +260,8 @@ describe('project repository', () => {
         name: 'Trimmed',
         description: '',
         agentContext: '',
-        optimizationPrompt: ''
+        optimizationPrompt: '',
+        s3AutoUpload: false
       }
     })
   })
@@ -513,7 +514,8 @@ describe('project repository', () => {
         name: 'Research',
         description: '',
         agentContext: 'Always cite DOIs.',
-        optimizationPrompt: ''
+        optimizationPrompt: '',
+        s3AutoUpload: false
       }
     })
   })

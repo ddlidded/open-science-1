@@ -27,6 +27,7 @@ model Project {
   sessionDefaults            String                      @default("{}")
   isExample                  Boolean                     @default(false)
   pinned                     Boolean                     @default(false)
+  s3AutoUpload               Boolean                     @default(false)
   archivedAt                 DateTime?
   archiveRevision            Int                         @default(0)
   deletedAt                  DateTime?

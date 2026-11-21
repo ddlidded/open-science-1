@@ -813,6 +813,15 @@ class SettingsRepository {
     return this.mutate((settings) => ({ ...settings, notebookNetwork }))
   }
 
+  async setS3(value: import('../../shared/s3-sync').S3Settings | undefined): Promise<StoredSettings> {
+    return this.mutate((settings) => {
+      const next = { ...settings }
+      if (value) next.s3 = value
+      else delete next.s3
+      return next
+    })
+  }
+
   async setWslSelection(selection: WslSelection): Promise<StoredSettings> {
     const distro = selection.distro.trim()
     const user = selection.user.trim()

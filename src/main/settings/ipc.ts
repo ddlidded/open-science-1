@@ -78,6 +78,7 @@ import type {
   OpenWslTerminalRequest,
   SelectWslProfileRequest
 } from '../../shared/wsl-setup'
+import type { S3SettingsDraft } from '../../shared/s3-sync'
 import { SettingsService } from './service'
 import type {
   SkillMarketplaceDetailRequest,
@@ -441,6 +442,15 @@ const registerSettingsIpcHandlers = ({
   )
   ipcMainHandle('settings:set-notebook-network', (_event, request: SetNotebookNetworkRequest) =>
     snapshotCommits.projectAfter(service.setNotebookNetwork(request))
+  )
+  ipcMainHandle('settings:set-s3-settings', (_event, request: S3SettingsDraft) =>
+    snapshotCommits.projectAfter(service.setS3Settings(request))
+  )
+  ipcMainHandle('settings:test-s3-connection', (_event, request: S3SettingsDraft | undefined) =>
+    service.testS3Connection(request)
+  )
+  ipcMainHandle('settings:list-s3-folders', (_event, request: { prefix?: string } | undefined) =>
+    service.listS3Folders(request)
   )
   ipcMainHandle('settings:install-notebook-network', () => service.installNotebookNetwork())
   ipcMainHandle('settings:cancel-notebook-network-setup', () =>

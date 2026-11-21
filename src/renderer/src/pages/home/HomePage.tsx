@@ -57,6 +57,7 @@ import {
   type SessionPendingInteractionFacts
 } from '@/hooks/useSessionPendingInteractions'
 import { startWslSetupConversation } from '@/lib/wsl-support-handoff'
+import isotopiqLogoUrl from '@/assets/isotopiq-logo.png'
 import { GitHubStarBadge } from '@/components/GitHubStarBadge'
 import { NetworkStatusIndicator } from '@/components/NetworkStatusIndicator'
 import { NotificationBell } from '@/components/NotificationBell'
@@ -671,9 +672,9 @@ const HomePage = ({
                       href={APP.links.website}
                       target="_blank"
                       rel="noreferrer"
-                      className="font-serif text-[26px] font-medium leading-none tracking-[-0.02em] text-text-000 hover:text-text-100"
+                      className="flex items-center hover:opacity-80"
                     >
-                      Open-Science
+                      <img src={isotopiqLogoUrl} alt={t('isotopiq')} className="h-7 w-auto" />
                     </a>
                     {hasCompleteSessionCatalog &&
                     (activeSessionCounts.waiting > 0 || activeSessionCounts.running > 0) ? (

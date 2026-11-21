@@ -17,6 +17,13 @@ import { parseSettingsSnapshot } from '../../shared/settings-runtime'
 import { requireDesktopCaller } from '../caller-context'
 import type { PrivateDestinationRequest } from '../../shared/notebook-network-settings'
 import type {
+  S3CreateFolderRequest,
+  S3SettingsDraft,
+  S3UploadFilesRequest,
+  S3UploadFilesResult
+} from '../../shared/s3-sync'
+import { s3CreateFolderRequestSchema, s3UploadFilesRequestSchema } from '../../shared/s3-sync'
+import type {
   AppIconPreview,
   ClaudeInstallEvent,
   InstallClaudeRequest,
@@ -161,6 +168,9 @@ type CoreSettingsCommandStore = Pick<
   | 'setPackageMirror'
   | 'setNetworkProxy'
   | 'setNotebookNetwork'
+  | 'setS3Settings'
+  | 'testS3Connection'
+  | 'listS3Folders'
   | 'setProjectFilesFilter'
   | 'setReviewerModel'
   | 'setPromptOptimizationModel'
@@ -547,6 +557,31 @@ const settingsCoreApplicationCommands = Object.freeze({
     readonly [request: SetNotebookNetworkRequest],
     StoreResult<'setNotebookNetwork'>
   >('settings:set-notebook-network'),
+  setS3Settings: defineApplicationCommand<
+    'settings:set-s3-settings',
+    readonly [request: S3SettingsDraft],
+    StoreResult<'setS3Settings'>
+  >('settings:set-s3-settings'),
+  testS3Connection: defineApplicationCommand<
+    'settings:test-s3-connection',
+    readonly [request: S3SettingsDraft | undefined],
+    StoreResult<'testS3Connection'>
+  >('settings:test-s3-connection'),
+  listS3Folders: defineApplicationCommand<
+    'settings:list-s3-folders',
+    readonly [request: { prefix?: string } | undefined],
+    StoreResult<'listS3Folders'>
+  >('settings:list-s3-folders'),
+  createS3Folder: defineApplicationCommand<
+    'settings:create-s3-folder',
+    readonly [request: S3CreateFolderRequest],
+    void
+  >('settings:create-s3-folder'),
+  uploadFilesToS3: defineApplicationCommand<
+    'settings:upload-files-to-s3',
+    readonly [request: S3UploadFilesRequest],
+    S3UploadFilesResult
+  >('settings:upload-files-to-s3'),
   setProjectFilesFilter: defineApplicationCommand<
     'settings:set-project-files-filter',
     readonly [request: SetProjectFilesFilterRequest],
@@ -686,6 +721,11 @@ const settingsCoreApplicationCommandGroup = defineApplicationCommandGroup('setti
   settingsCoreApplicationCommands.setPackageMirror,
   settingsCoreApplicationCommands.setNetworkProxy,
   settingsCoreApplicationCommands.setNotebookNetwork,
+  settingsCoreApplicationCommands.setS3Settings,
+  settingsCoreApplicationCommands.testS3Connection,
+  settingsCoreApplicationCommands.listS3Folders,
+  settingsCoreApplicationCommands.createS3Folder,
+  settingsCoreApplicationCommands.uploadFilesToS3,
   settingsCoreApplicationCommands.setProjectFilesFilter,
   settingsCoreApplicationCommands.setReviewerModel,
   settingsCoreApplicationCommands.setPromptOptimizationModel,
@@ -708,6 +748,14 @@ type CoreSettingsApplicationCommandDependencies = Readonly<{
   localShell: Pick<LocalShellSettingsWorkflows, 'switchToPowerShell' | 'useWsl2Bash'>
   snapshotCommits: SettingsSnapshotCommitOwner
   emitInstallEvent: (event: ClaudeInstallEvent) => void
+  s3Uploads?: {
+    uploadFiles: (request: {
+      projectId: string
+      fileIds: string[]
+      destinationPrefix: string
+    }) => Promise<{ queued: number }>
+    createFolder: (prefix: string) => Promise<void>
+  }
   listAppIconPreviews?: () => AppIconPreview[]
 }>
 
@@ -965,6 +1013,40 @@ const registerCoreSettingsApplicationCommands = (
         return dependencies.snapshotCommits.projectAfter(
           dependencies.service.setNotebookNetwork(args[0])
         )
+      },
+      'settings:set-s3-settings': ({ args, callerContext }) => {
+        requireLocalCaller(callerContext, 'settings:set-s3-settings')
+        return dependencies.snapshotCommits.projectAfter(
+          dependencies.service.setS3Settings(args[0])
+        )
+      },
+      'settings:test-s3-connection': ({ args, callerContext }) => {
+        requireLocalCaller(callerContext, 'settings:test-s3-connection')
+        return dependencies.service.testS3Connection(args[0])
+      },
+      'settings:list-s3-folders': ({ args, callerContext }) => {
+        requireLocalCaller(callerContext, 'settings:list-s3-folders')
+        return dependencies.service.listS3Folders(args[0])
+      },
+      'settings:create-s3-folder': ({ args, callerContext }) => {
+        requireLocalCaller(callerContext, 'settings:create-s3-folder')
+        if (!dependencies.s3Uploads) {
+          throw new Error('S3 uploads are not available.')
+        }
+        const request = s3CreateFolderRequestSchema.parse(args[0])
+        return dependencies.s3Uploads.createFolder(request.prefix)
+      },
+      'settings:upload-files-to-s3': ({ args, callerContext }) => {
+        requireLocalCaller(callerContext, 'settings:upload-files-to-s3')
+        if (!dependencies.s3Uploads) {
+          throw new Error('S3 uploads are not available.')
+        }
+        const request = s3UploadFilesRequestSchema.parse(args[0])
+        return dependencies.s3Uploads.uploadFiles({
+          projectId: request.projectId,
+          fileIds: request.fileIds,
+          destinationPrefix: request.prefix
+        })
       },
       'settings:set-project-files-filter': ({ args, callerContext }) => {
         requireLocalCaller(callerContext, 'settings:set-project-files-filter')

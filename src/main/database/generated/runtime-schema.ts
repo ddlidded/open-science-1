@@ -10,6 +10,7 @@ const RUNTIME_SCHEMA_TABLE_DDLS = [
     "sessionDefaults" TEXT NOT NULL DEFAULT '{}',
     "isExample" BOOLEAN NOT NULL DEFAULT false,
     "pinned" BOOLEAN NOT NULL DEFAULT false,
+    "s3AutoUpload" BOOLEAN NOT NULL DEFAULT false,
     "archivedAt" DATETIME,
     "archiveRevision" INTEGER NOT NULL DEFAULT 0,
     "deletedAt" DATETIME,

@@ -341,6 +341,9 @@ export type SettingsSnapshot = {
   packageMirror?: PackageMirror
   // Application-wide proxy preference. Older documents without this field resolve to System.
   networkProxy?: NetworkProxySettings
+  // Custom S3-compatible object-storage destination for per-project auto-upload. The secret key is
+  // never exposed; the view only reports whether one is stored. Absent means not configured.
+  s3?: import('./s3-sync').S3SettingsView
   // Global Notebook REPL/Bash egress policy. Historical settings resolve to the safe defaults.
   notebookFolderRestrictionEnabled?: boolean
   notebookNetwork?: NotebookNetworkSettings
